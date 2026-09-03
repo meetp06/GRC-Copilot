@@ -37,14 +37,31 @@ document, so it survives an auditor.
 
 | Week | Focus | Status |
 |------|-------|--------|
-| 1 | Raw agent loop, no framework, Bedrock | 🟡 In progress |
-| 2 | RAG + golden eval set | ⚪ Not started |
+| 1 | Raw agent loop, no framework, Bedrock | ✅ Complete |
+| 2 | RAG + golden eval set | 🟡 Next |
 | 3 | LangGraph multi-agent + human-in-the-loop | ⚪ Not started |
 | 4 | Data pipeline + control ontology | ⚪ Not started |
 | 5 | FastAPI + SDK + MCP + observability | ⚪ Not started |
 | 6 | Terraform + CI/CD + threat model | ⚪ Not started |
 
 *Keep this table current. It's the first thing anyone reads.*
+
+### What week 1 measured
+
+The naive pieces were built to fail in specific, measurable ways. They did:
+
+| Measurement | Result |
+|---|---|
+| Keyword search vs. paraphrased questions | **8 of 12 missed**, 7 of them answerable from the corpus |
+| Vague tool description (`"Searches things."`) | **2.2x tokens** for the same answer — 3 steps to 6 |
+| Step cap (`MAX_AGENT_STEPS=2`) | Fires correctly, run halts |
+| Token budget, checked before each call | Fires correctly (`907 >= 100`, stopped at step 2) |
+| Repeated-call guard | Runaway did **not** reproduce on Nova Lite — it gives up and answers |
+| Total AWS spend, week 1 | ~$0.005 |
+
+`patch != remediation`, `severe != critical`, `breach != incident`. The corpus answers the
+question; keyword search cannot see it. That is the argument for embeddings in week 2 — a
+measured baseline rather than an assumption.
 
 ## Quickstart
 
@@ -117,3 +134,8 @@ Honest list, kept current. This section is a feature — it's what makes the res
   **not** IL5, **not** FedRAMP-assessed. Those require an organizational sponsor.
 - Single-tenant. Multi-tenant isolation is not implemented.
 - Auth is an API key, not real per-tenant authorization.
+- Retrieval is keyword matching, so it misses paraphrased questions (measured above). Week 2.
+- Answers are parsed out of free text, so a chatty model can produce an unparseable answer.
+  Week 2 replaces this with structured output via a tool call.
+- `get_control_info` echoes unknown input back in its error string. Harmless for a control
+  ID, but this product treats uploaded text as hostile — worth removing before real input.
