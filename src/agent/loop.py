@@ -168,7 +168,7 @@ def run_agent(question: str, verbose: bool = True) -> dict[str, Any]:
     return {
         "result": None,
         "raw": None,
-        "steps": max_steps,
+        "steps": step,
         "usage": usage,
         "stop": stop_note,
     }
@@ -181,10 +181,15 @@ def _parse_json_answer(text: str) -> dict[str, Any] | None:
     parsing problem entirely. Doing it the fragile way once is instructive.
     """
     cleaned = text.strip()
-    if cleaned.startswith("```"):
+    if "```" in cleaned:
         cleaned = cleaned.split("```")[1]
         if cleaned.startswith("json"):
             cleaned = cleaned[4:]
+    # Models prepend prose (<thinking> tags, "Here is the answer:"). Take the
+    # outermost {...} span rather than trusting the response to start with JSON.
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start != -1 and end > start:
+        cleaned = cleaned[start : end + 1]
     try:
         return json.loads(cleaned.strip())
     except json.JSONDecodeError:
