@@ -1,0 +1,119 @@
+# GRC Copilot
+
+Automates security-questionnaire responses for companies selling software to enterprise
+buyers.
+
+## The problem
+
+A startup sells software. A large enterprise wants to buy it. Before signing, the
+enterprise's security team sends a 200-question security questionnaire (SIG, CAIQ, or their
+own spreadsheet): *Do you encrypt data at rest? Who can access customer data? How fast do
+you patch critical CVEs?*
+
+The startup already has these answers — buried across policy PDFs, past questionnaires, and
+people's heads. Answering takes an analyst 2-4 days of copy-paste. The deal waits.
+
+It looks like a search problem. It isn't. Every answer needs a citation to a source document,
+because an auditor will check it. And a wrong answer isn't a bad search result — it's a false
+attestation to a customer. **The system has to know when it doesn't know.**
+
+## What this builds
+
+Upload a questionnaire. A multi-agent system:
+
+1. Retrieves relevant text from the company's own policy corpus (hybrid search)
+2. Drafts an answer
+3. A separate verifier agent checks every claim actually appears in the source
+4. Attaches a citation (document, section)
+5. Maps the answer to a NIST 800-53 control
+6. Scores confidence, auto-answers the confident ones, routes the rest to human review
+
+2 days becomes ~20 minutes of review-and-approve. Every answer is traceable to a source
+document, so it survives an auditor.
+
+**Sold to the startup, not the enterprise.**
+
+## Status
+
+| Week | Focus | Status |
+|------|-------|--------|
+| 1 | Raw agent loop, no framework, Bedrock | 🟡 In progress |
+| 2 | RAG + golden eval set | ⚪ Not started |
+| 3 | LangGraph multi-agent + human-in-the-loop | ⚪ Not started |
+| 4 | Data pipeline + control ontology | ⚪ Not started |
+| 5 | FastAPI + SDK + MCP + observability | ⚪ Not started |
+| 6 | Terraform + CI/CD + threat model | ⚪ Not started |
+
+*Keep this table current. It's the first thing anyone reads.*
+
+## Quickstart
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+pre-commit install
+
+cp .env.example .env      # then edit it
+
+aws configure --profile grc-copilot
+python scripts/check_bedrock.py       # confirms access + lists YOUR model IDs
+python -m src.agent.loop "Do you encrypt customer data at rest?"
+```
+
+## Architecture (current — week 1)
+
+```
+  question
+     |
+     v
+  +---------------------------+
+  |  raw agent loop           |     while step < MAX_STEPS:
+  |  (src/agent/loop.py)      |       1. send messages + tools to model
+  |                           |       2. model returns text OR tool_use
+  |  no framework on purpose  |       3. execute tool, append result
+  +------------+--------------+       4. repeat
+               |
+     +---------+---------+
+     |                   |
+     v                   v
+ search_policies    get_control_info
+ (keyword, naive)   (hardcoded dict)
+```
+
+Week 3 replaces the hand-written loop with a LangGraph `StateGraph`. Building it by hand
+first is deliberate — see [ADR-0003](docs/adr/0003-raw-loop-before-framework.md).
+
+Everything naive here is naive on purpose. Each piece fails in a specific way that motivates
+the next week's work.
+
+## Documentation
+
+| Document | What it's for |
+|----------|---------------|
+| [CLAUDE.md](CLAUDE.md) | Ground rules for Claude Code working in this repo |
+| [docs/ROADMAP.md](docs/ROADMAP.md) | The whole six-week plan |
+| [docs/weeks/](docs/weeks/) | Detailed plan per week — tasks, hours, definition of done |
+| [docs/TECH-CHOICES.md](docs/TECH-CHOICES.md) | Every technology, its alternatives, when each wins |
+| [docs/MISTAKES-TO-HUNT.md](docs/MISTAKES-TO-HUNT.md) | Failures to trigger deliberately, per week |
+| [docs/INTERVIEW-PREP.md](docs/INTERVIEW-PREP.md) | The two-minute story, question bank, JD mapping |
+| [docs/COST-GUARDRAILS.md](docs/COST-GUARDRAILS.md) | AWS cost safety rules |
+| [docs/adr/](docs/adr/) | Architecture Decision Records |
+| [MISTAKES.md](MISTAKES.md) | Running bug log |
+
+## Cost
+
+Target: **under $5/month.** See [COST-GUARDRAILS.md](docs/COST-GUARDRAILS.md).
+
+The one rule worth repeating here: **never enable OpenSearch Serverless (Classic)** — it
+bills roughly $350/month idle, and several AWS RAG tutorials use it without warning you.
+
+## Limitations
+
+Honest list, kept current. This section is a feature — it's what makes the rest credible.
+
+- Prompt injection through uploaded documents is *mitigated, not solved*. Nobody has solved
+  it. See the threat model (week 6).
+- Runs in commercial AWS, architected against NIST 800-53 control patterns. **Not** GovCloud,
+  **not** IL5, **not** FedRAMP-assessed. Those require an organizational sponsor.
+- Single-tenant. Multi-tenant isolation is not implemented.
+- Auth is an API key, not real per-tenant authorization.
