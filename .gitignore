@@ -8,3 +8,6 @@ __pycache__/
 *.log
 runs/
 .aws-sam/
+
+# derived: rebuildable with `python -m src.rag.index build`
+data/index/
