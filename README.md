@@ -39,8 +39,8 @@ document, so it survives an auditor.
 |------|-------|--------|
 | 1 | Raw agent loop, no framework, Bedrock | ✅ Complete |
 | 2 | RAG + golden eval set | ✅ Complete |
-| 3 | LangGraph multi-agent + human-in-the-loop | 🟡 Next |
-| 4 | Data pipeline + control ontology | ⚪ Not started |
+| 3 | LangGraph multi-agent + human-in-the-loop | ✅ Complete |
+| 4 | Data pipeline + control ontology | 🟡 Next |
 | 5 | FastAPI + SDK + MCP + observability | ⚪ Not started |
 | 6 | Terraform + CI/CD + threat model | ⚪ Not started |
 
@@ -115,6 +115,60 @@ The four decisions behind these numbers: [ADR-0005 chunking](docs/adr/0005-chunk
 | Measurement | Result |
 |---|---|
 | Total AWS spend, week 2 | ~$0.03 |
+
+### What week 3 measured
+
+A 50-question questionnaire, end to end:
+
+> **38 of 50 auto-answered, every one with a citation. 12 flagged for review. 44 seconds. $0.008.**
+
+Of the 12 flagged, 6 are correct refusals — SOC 2, FedRAMP, HIPAA BAA, bug bounty, cyber
+insurance twice. One of those (`q_050`) was never in the eval set and asks about insurance in
+different words to the one that was; it was refused too.
+
+**Confidence calibration** over the 45-question golden set. Confidence decides what ships
+without a human reading it, so the number has to mean something:
+
+| Band | n | correct | precision |
+|---|---|---|---|
+| high | 31 | 31 | **100%** |
+| medium | 2 | 2 | 100% |
+| low | 12 | 5 | 42% |
+
+Compared against the model's own stated confidence, scored identically:
+
+| Model said | n | precision |
+|---|---|---|
+| high | 36 | 92% |
+| low | 9 | 56% |
+
+The model called 36 answers high and was wrong on 3. The computed score — verifier passed
+first time, retrieval margin, whether anything was cited, model opinion as the weakest
+tiebreak — marked 31 high and was wrong on none, moving those 3 where a human catches them.
+A model's confidence comes from the same pass that produced the answer, so it is not
+independent evidence about it.
+
+**Durability**, demonstrated rather than assumed. A process answered three questions and
+`SIGKILL`ed itself; a second process read back two finished and one parked at
+`('human_review',)` with 1173 input tokens spent. Resuming it there left the count at 1173 —
+nothing re-ran. That unchanged number is the whole justification for adopting a framework.
+
+**Concurrency**, measured rather than guessed. The week 3 plan predicted early Bedrock
+throttling; it never appeared. 50 questions at concurrency 4 / 20 / 50 took 17.2s / 15.7s /
+10.7s with zero retries and zero errors. The default is now 20, at the knee.
+
+**The verifier is not a clear win**, and is recorded that way: −4 points of answerable
+accuracy and 2× cost, for +2 points of citation precision and a runtime guard against
+subject-drift claims the eval set cannot see. See
+[ADR-0010](docs/adr/0010-graph-topology-and-the-verifier.md).
+
+Decisions: [ADR-0009 framework choice](docs/adr/0009-langgraph-over-a-hand-written-loop.md),
+[ADR-0010 topology and verifier](docs/adr/0010-graph-topology-and-the-verifier.md),
+[ADR-0011 checkpointing](docs/adr/0011-sqlite-checkpointer-and-thread-per-question.md).
+
+| Measurement | Result |
+|---|---|
+| Total AWS spend, week 3 | ~$0.05 |
 
 ## Quickstart
 
