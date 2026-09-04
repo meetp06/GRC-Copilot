@@ -38,8 +38,8 @@ document, so it survives an auditor.
 | Week | Focus | Status |
 |------|-------|--------|
 | 1 | Raw agent loop, no framework, Bedrock | ✅ Complete |
-| 2 | RAG + golden eval set | 🟡 Next |
-| 3 | LangGraph multi-agent + human-in-the-loop | ⚪ Not started |
+| 2 | RAG + golden eval set | ✅ Complete |
+| 3 | LangGraph multi-agent + human-in-the-loop | 🟡 Next |
 | 4 | Data pipeline + control ontology | ⚪ Not started |
 | 5 | FastAPI + SDK + MCP + observability | ⚪ Not started |
 | 6 | Terraform + CI/CD + threat model | ⚪ Not started |
@@ -62,6 +62,59 @@ The naive pieces were built to fail in specific, measurable ways. They did:
 `patch != remediation`, `severe != critical`, `breach != incident`. The corpus answers the
 question; keyword search cannot see it. That is the argument for embeddings in week 2 — a
 measured baseline rather than an assumption.
+
+### What week 2 measured
+
+Corpus grew from 4 documents to 12 (58 sections). The eval set is
+[`evals/golden_set.yaml`](evals/golden_set.yaml) — 45 questions across five bands, written
+before any retrieval work so every change below is a number, not an opinion.
+
+**Retrieval**, top-5 over the 40 answerable questions. `medium` is paraphrased with no shared
+keywords; `exact` is a literal token such as `SC-28` or `AES-256`:
+
+| Retriever | easy | medium | hard | exact | ALL recall | MRR |
+|---|---|---|---|---|---|---|
+| Keyword (week 1 baseline) | 100% | 33% | 50% | 80% | **60%** | 0.53 |
+| Vector (Titan V2, section chunks) | 100% | 100% | 92% | 90% | **97%** | 0.93 |
+| Hybrid (vector + BM25, RRF) | 100% | 73% | 77% | 100% | **84%** | 0.76 |
+
+**Hybrid was tried and rejected on the numbers.** BM25 fixes the exact band (90% → 100%) and
+costs more than that everywhere else, because with only five slots and vector search already
+at 97%, every slot BM25 wins displaces a correct answer. Sweeping the fusion weight degraded
+monotonically. Expected to reverse on a real corpus — see ADR.
+
+**Chunking**, measured against the 34 distinct gold sections:
+
+| Strategy | chunks | median tokens | sections/chunk | gold sections intact |
+|---|---|---|---|---|
+| Section-aware | 58 | 79 | 1.00 | **34/34** |
+| Fixed 512/64 | 13 | 395 | 4.54 | 33/34 |
+| Fixed 128/16 | 46 | 128 | 2.20 | **17/34** |
+
+Small chunks cut answers in half; large chunks stop discriminating. At 512 tokens the window
+exceeds most documents, so a "chunk" is nearly a whole policy and top-5 returns 38% of the
+corpus.
+
+**Answering**, all 45 questions, one Nova Lite call each, answer shape forced by a tool schema:
+
+| Prompt | answerable accuracy | citation precision | answered w/o citing | hallucination |
+|---|---|---|---|---|
+| naive (one sentence) | 100% | 94% | **20%** | 0% |
+| **concise (shipped)** | 91% | 97% | **0%** | 0% |
+| strict (a page of rules) | 87% | 97% | 2% | 0% |
+
+Hallucination is 0% under every prompt including the lazy one — the **schema** prevents it,
+not the instructions. Making `answerable` a required boolean forces that decision before any
+prose is written. The naive prompt's 100% is a trap: a fifth of its answers cite nothing, and
+an uncited answer cannot survive an auditor.
+
+Longer prompts made this model *worse*, monotonically. Raw runs in [`evals/results/`](evals/results/).
+
+The four decisions behind these numbers: [ADR-0005 chunking](docs/adr/0005-chunking-strategy.md), [ADR-0006 vector store](docs/adr/0006-vector-store.md), [ADR-0007 hybrid rejected](docs/adr/0007-hybrid-retrieval-rejected.md), [ADR-0008 prompt length](docs/adr/0008-prompt-length-and-structured-output.md).
+
+| Measurement | Result |
+|---|---|
+| Total AWS spend, week 2 | ~$0.03 |
 
 ## Quickstart
 

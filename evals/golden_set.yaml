@@ -1,0 +1,524 @@
+# Golden evaluation set for GRC Copilot retrieval + answering.
+#
+# Rules for this file:
+#   - Never edit an entry to make a run look better. If an entry is wrong, fix it
+#     and record the change in MISTAKES.md.
+#   - expected_chunks is the set of gold passages. Context recall is measured over
+#     the whole set: retrieving one of two required chunks is partial credit.
+#   - expected_control is null where no control in CONTROL_CATALOG covers the
+#     question. Filling that gap is week 4 (control ontology), not week 2.
+#   - unanswerable entries carry no ground truth. Scoring them is a cascade:
+#     the model's structured answerable flag, plus a substring check for refusal
+#     language, and an LLM judge only where those two disagree. Refusal markers
+#     live in the evaluator, not here, so the set cannot be tuned to pass.
+#
+# Bands: 10 easy, 15 medium, 10 hard, 5 exact, 5 unanswerable.
+
+version: 1
+corpus: data/policies
+questions:
+
+  # ---------------------------------------------------------------- easy (10)
+  # Direct keyword overlap with the policy text. Week 1 keyword search should
+  # already answer most of these. They are the control group.
+
+  - id: q_001
+    question: "Do you encrypt customer data at rest?"
+    difficulty: easy
+    category: encryption
+    expected_chunks:
+      - source: information-security-policy.md
+        section: "Encryption at rest"
+    expected_control: SC-28
+    ground_truth_answer: "Yes. All customer data stored in production is encrypted at rest using AES-256, with keys managed in AWS KMS using customer-managed keys with automatic annual rotation."
+
+  - id: q_002
+    question: "What TLS version is required for data in transit?"
+    difficulty: easy
+    category: encryption
+    expected_chunks:
+      - source: information-security-policy.md
+        section: "Encryption in transit"
+    expected_control: SC-8
+    ground_truth_answer: "TLS 1.2 or higher. TLS 1.0 and 1.1 are disabled at the load balancer."
+
+  - id: q_003
+    question: "How quickly do you remediate critical vulnerabilities?"
+    difficulty: easy
+    category: vulnerability_management
+    expected_chunks:
+      - source: vulnerability-management-policy.md
+        section: "Remediation timelines"
+    expected_control: RA-5
+    ground_truth_answer: "Critical severity findings are remediated within 7 days. High within 30 days, medium within 90 days, low at the next scheduled maintenance."
+
+  - id: q_004
+    question: "Do you perform an annual penetration test?"
+    difficulty: easy
+    category: vulnerability_management
+    expected_chunks:
+      - source: vulnerability-management-policy.md
+        section: "Penetration testing"
+    expected_control: null
+    ground_truth_answer: "Yes. An independent third party performs an application penetration test annually. The most recent test was completed in February 2026 and a summary letter is available under NDA."
+
+  - id: q_005
+    question: "Is multi-factor authentication enforced for access to production systems?"
+    difficulty: easy
+    category: access_control
+    expected_chunks:
+      - source: access-control-policy.md
+        section: "Authentication"
+    expected_control: IA-2
+    ground_truth_answer: "Yes. All employee access to production requires single sign-on with MFA enforced, and MFA cannot be disabled by end users."
+
+  - id: q_006
+    question: "How often are user access reviews performed?"
+    difficulty: easy
+    category: access_control
+    expected_chunks:
+      - source: access-control-policy.md
+        section: "Access reviews"
+    expected_control: AC-2
+    ground_truth_answer: "Quarterly, by the system owner. Findings are remediated within 14 days and review evidence is retained for 3 years."
+
+  - id: q_007
+    question: "What is your recovery time objective (RTO) for the production service?"
+    difficulty: easy
+    category: business_continuity
+    expected_chunks:
+      - source: business-continuity-and-disaster-recovery-plan.md
+        section: "Recovery objectives"
+    expected_control: null
+    ground_truth_answer: "4 hours, applied to a full loss of the primary AWS region."
+
+  - id: q_008
+    question: "How long are production audit logs retained?"
+    difficulty: easy
+    category: logging
+    expected_chunks:
+      - source: vulnerability-management-policy.md
+        section: "Logging and monitoring"
+    expected_control: AU-2
+    ground_truth_answer: "400 days, in a dedicated access-restricted account. Production API calls are logged to AWS CloudTrail with log file validation enabled."
+
+  - id: q_009
+    question: "Do employees receive security awareness training?"
+    difficulty: easy
+    category: hr_security
+    expected_chunks:
+      - source: human-resources-security-policy.md
+        section: "Security awareness training"
+    expected_control: null
+    ground_truth_answer: "Yes. Training is mandatory at hire and annually thereafter, with completion tracked and reported to the Head of Security. Simulated phishing exercises run quarterly."
+
+  - id: q_010
+    question: "Is code review required before changes are merged to production?"
+    difficulty: easy
+    category: secure_development
+    expected_chunks:
+      - source: secure-development-policy.md
+        section: "Code review"
+    expected_control: null
+    ground_truth_answer: "Yes. Every production code change requires review and approval by at least one engineer other than the author. Branch protection enforces this and cannot be bypassed by the author."
+
+  # -------------------------------------------------------------- medium (15)
+  # Paraphrase and synonym. The literal policy terms are deliberately absent
+  # from the question. This band is the argument for embeddings.
+
+  - id: q_011
+    question: "Is client information protected while it is being stored on your systems?"
+    difficulty: medium
+    category: encryption
+    expected_chunks:
+      - source: information-security-policy.md
+        section: "Encryption at rest"
+    expected_control: SC-28
+    ground_truth_answer: "Yes. Customer data in production is encrypted at rest with AES-256 using AWS KMS customer-managed keys, covering S3, RDS, and EBS, including snapshots and backups."
+
+  - id: q_012
+    question: "When a staff member leaves the company, how fast is their entry to systems shut off?"
+    difficulty: medium
+    category: access_control
+    expected_chunks:
+      - source: access-control-policy.md
+        section: "Offboarding"
+    expected_control: AC-2
+    ground_truth_answer: "Within 4 hours of departure. Offboarding is triggered automatically from the HR system."
+
+  - id: q_013
+    question: "What happens to our information once we stop using your service?"
+    difficulty: medium
+    category: data_retention
+    expected_chunks:
+      - source: information-security-policy.md
+        section: "Data retention and deletion"
+    expected_control: null
+    ground_truth_answer: "Data is retained for the subscription duration plus 30 days. On written deletion request, production data is deleted within 30 days and backup copies expire within a further 35 days, with deletion confirmed in writing."
+
+  - id: q_014
+    question: "How soon would we hear from you if our records were exposed?"
+    difficulty: medium
+    category: incident_response
+    expected_chunks:
+      - source: incident-response-plan.md
+        section: "Customer notification"
+    expected_control: IR-4
+    ground_truth_answer: "Without undue delay and within 72 hours of confirmation, via the designated security contact, including what happened, what data was involved, and what actions were taken."
+
+  - id: q_015
+    question: "Do your engineers get unrestricted rights over live systems by default?"
+    difficulty: medium
+    category: access_control
+    expected_chunks:
+      - source: access-control-policy.md
+        section: "Least privilege"
+    expected_control: AC-6
+    ground_truth_answer: "No. Engineers receive read-only access by default. Write access to production databases requires a documented request, manager approval, and is time-bound to a maximum of 8 hours through just-in-time access."
+
+  - id: q_016
+    question: "In a regional outage, how much of our recent work could be lost?"
+    difficulty: medium
+    category: business_continuity
+    expected_chunks:
+      - source: business-continuity-and-disaster-recovery-plan.md
+        section: "Recovery objectives"
+    expected_control: null
+    ground_truth_answer: "Up to 1 hour. The recovery point objective is 1 hour for a full loss of the primary AWS region."
+
+  - id: q_017
+    question: "Are new joiners vetted before they start work?"
+    difficulty: medium
+    category: hr_security
+    expected_chunks:
+      - source: human-resources-security-policy.md
+        section: "Background checks"
+    expected_control: null
+    ground_truth_answer: "Yes. All employees undergo a background check before their start date covering criminal history and employment verification, to the extent permitted by local law. Contractors with production access are subject to the same check."
+
+  - id: q_018
+    question: "Do you check outside companies before letting them touch our data?"
+    difficulty: medium
+    category: vendor_management
+    expected_chunks:
+      - source: vendor-management-policy.md
+        section: "Vendor onboarding"
+    expected_control: null
+    ground_truth_answer: "Yes. Every vendor that will process customer data or connect to production is assessed before contract signature, covering certifications, subprocessors, and breach notification commitments, and is tiered Critical, High, or Standard."
+
+  - id: q_019
+    question: "How do you keep passwords and API keys out of your codebase?"
+    difficulty: medium
+    category: secure_development
+    expected_chunks:
+      - source: secure-development-policy.md
+        section: "Secrets management"
+    expected_control: null
+    ground_truth_answer: "Secrets are stored in AWS Secrets Manager and injected at runtime as environment variables, never committed to source control. Automated secret scanning runs on every push and blocks the commit on a match; discovered secrets are rotated within 24 hours."
+
+  - id: q_020
+    question: "Can your staff keep our records on their own personal laptops?"
+    difficulty: medium
+    category: hr_security
+    expected_chunks:
+      - source: human-resources-security-policy.md
+        section: "Acceptable use and confidentiality"
+    expected_control: null
+    ground_truth_answer: "No. Personal devices may not be used to store customer data, and employees may access customer data only where there is a documented business need."
+
+  - id: q_021
+    question: "Is your live environment kept apart from where developers experiment?"
+    difficulty: medium
+    category: secure_development
+    expected_chunks:
+      - source: secure-development-policy.md
+        section: "Environment separation"
+    expected_control: null
+    ground_truth_answer: "Yes. Development, staging, and production run in separate AWS accounts with no shared credentials. Production customer data is never copied into development or staging; test data is synthetic."
+
+  - id: q_022
+    question: "Where in the world does our information physically live?"
+    difficulty: medium
+    category: privacy
+    expected_chunks:
+      - source: data-privacy-policy.md
+        section: "Data residency"
+    expected_control: null
+    ground_truth_answer: "In the AWS eu-west-1 or us-east-1 region, selected by the customer at provisioning. Data does not leave the selected region except for backups replicated to a second region within the same jurisdiction."
+
+  - id: q_023
+    question: "Do you have protection against traffic floods aimed at your site?"
+    difficulty: medium
+    category: network_security
+    expected_chunks:
+      - source: network-security-policy.md
+        section: "Perimeter controls"
+    expected_control: null
+    ground_truth_answer: "Yes. Public endpoints sit behind a web application firewall with OWASP Top 10 managed rules and behind AWS Shield for volumetric denial-of-service protection, with per-API-key rate limiting."
+
+  - id: q_024
+    question: "How do you know which machines belong to the company?"
+    difficulty: medium
+    category: asset_management
+    expected_chunks:
+      - source: asset-and-endpoint-management-policy.md
+        section: "Asset inventory"
+    expected_control: null
+    ground_truth_answer: "An inventory of all company-owned endpoints and production cloud resources is maintained automatically. Endpoints are enrolled in mobile device management at issue, and one that has not checked in for 30 days is investigated."
+
+  - id: q_025
+    question: "Will you tell us before handing our data to another company?"
+    difficulty: medium
+    category: vendor_management
+    expected_chunks:
+      - source: vendor-management-policy.md
+        section: "Subprocessors"
+    expected_control: null
+    ground_truth_answer: "Yes. Customers are notified at least 30 days before a new subprocessor is added and may object in writing during that window. A current subprocessor list is maintained and published."
+
+  # ---------------------------------------------------------------- hard (10)
+  # The answer requires combining two or more passages, usually across
+  # documents. Retrieving one chunk produces a confident, incomplete answer.
+
+  - id: q_026
+    question: "When an employee leaves, what happens to both their system access and their company laptop?"
+    difficulty: hard
+    category: access_control
+    expected_chunks:
+      - source: access-control-policy.md
+        section: "Offboarding"
+      - source: asset-and-endpoint-management-policy.md
+        section: "Media disposal"
+    expected_control: AC-2
+    ground_truth_answer: "Access is revoked within 4 hours of departure, triggered automatically from the HR system. Hardware is collected and wiped within 5 business days, and decommissioned laptops are cryptographically erased before disposal with a disposal record retained for 3 years."
+
+  - id: q_027
+    question: "A critical vulnerability is disclosed in a third-party library you use. Walk us through how you would detect it and get the fix deployed."
+    difficulty: hard
+    category: vulnerability_management
+    expected_chunks:
+      - source: secure-development-policy.md
+        section: "Dependency management"
+      - source: vulnerability-management-policy.md
+        section: "Remediation timelines"
+      - source: secure-development-policy.md
+        section: "Change management"
+    expected_control: RA-5
+    ground_truth_answer: "Automated dependency alerts open a pull request for the advisory. A critical vulnerability follows the 7 day remediation timeline. The fix goes through peer review and the CI/CD pipeline, which runs unit tests, static analysis, and image scanning and blocks the deploy on a high-severity finding, with every deploy traceable to a merged pull request and its approver."
+
+  - id: q_028
+    question: "Are your backups encrypted to the same standard as your production data?"
+    difficulty: hard
+    category: encryption
+    expected_chunks:
+      - source: business-continuity-and-disaster-recovery-plan.md
+        section: "Backups"
+      - source: information-security-policy.md
+        section: "Encryption at rest"
+    expected_control: SC-28
+    ground_truth_answer: "Yes. Backups are encrypted at rest with AES-256 using the same AWS KMS customer-managed keys as production, and database snapshots and backups inherit production encryption."
+
+  - id: q_029
+    question: "If one of your vendors is breached, how quickly must they tell you, and how quickly would you then tell us?"
+    difficulty: hard
+    category: vendor_management
+    expected_chunks:
+      - source: vendor-management-policy.md
+        section: "Contractual requirements"
+      - source: incident-response-plan.md
+        section: "Customer notification"
+    expected_control: IR-4
+    ground_truth_answer: "Contracts with Critical and High tier vendors require security incident notification within 72 hours or less. Affected customers are then notified without undue delay and within 72 hours of confirmation."
+
+  - id: q_030
+    question: "How do your engineers connect to production, and do you use a VPN?"
+    difficulty: hard
+    category: network_security
+    expected_chunks:
+      - source: network-security-policy.md
+        section: "Remote access"
+      - source: access-control-policy.md
+        section: "Least privilege"
+    expected_control: AC-6
+    ground_truth_answer: "There is no VPN into production. Engineers use a just-in-time access workflow that issues short-lived AWS IAM role credentials after manager approval, time-bound to a maximum of 8 hours, with all sessions logged to CloudTrail."
+
+  - id: q_031
+    question: "Which NIST 800-53 control covers your encryption at rest, and which policy is the evidence for it?"
+    difficulty: hard
+    category: control_mapping
+    expected_chunks:
+      - source: risk-management-policy.md
+        section: "Control mapping summary"
+      - source: information-security-policy.md
+        section: "Encryption at rest"
+    expected_control: SC-28
+    ground_truth_answer: "SC-28, Protection of Information at Rest. The evidence is the Information Security Policy, encryption at rest section, which specifies AES-256 with AWS KMS customer-managed keys."
+
+  - id: q_032
+    question: "A GuardDuty alert fires at 2am. What severity does it get and who is woken up?"
+    difficulty: hard
+    category: incident_response
+    expected_chunks:
+      - source: network-security-policy.md
+        section: "Intrusion detection"
+      - source: incident-response-plan.md
+        section: "Scope and severity"
+      - source: incident-response-plan.md
+        section: "Response process"
+    expected_control: IR-4
+    ground_truth_answer: "High severity GuardDuty findings page the on-call engineer and are triaged as a Sev2 incident or higher. An incident commander is assigned at declaration; Sev1 pages the on-call engineer within 5 minutes and requires an incident commander within 15 minutes."
+
+  - id: q_033
+    question: "Can a single engineer push a change to production on their own?"
+    difficulty: hard
+    category: secure_development
+    expected_chunks:
+      - source: secure-development-policy.md
+        section: "Code review"
+      - source: secure-development-policy.md
+        section: "Change management"
+      - source: access-control-policy.md
+        section: "Least privilege"
+    expected_control: AC-6
+    ground_truth_answer: "No. Every change requires approval from an engineer other than the author, enforced by branch protection that the author cannot bypass, and deploys run through the automated CI/CD pipeline. Write access to production databases separately requires a documented request, manager approval, and is time-bound to 8 hours."
+
+  - id: q_034
+    question: "If we ask you to delete our data, how long could copies of it survive anywhere in your systems?"
+    difficulty: hard
+    category: data_retention
+    expected_chunks:
+      - source: information-security-policy.md
+        section: "Data retention and deletion"
+      - source: business-continuity-and-disaster-recovery-plan.md
+        section: "Backups"
+    expected_control: null
+    ground_truth_answer: "Production data is deleted within 30 days of a written request and backup copies expire within a further 35 days, so up to 65 days in total. The 35 day figure matches the point-in-time recovery retention window for production databases."
+
+  - id: q_035
+    question: "One of our end users asks us to delete their personal data. Who acts on that, and how long does it take?"
+    difficulty: hard
+    category: privacy
+    expected_chunks:
+      - source: data-privacy-policy.md
+        section: "Data subject requests"
+      - source: information-security-policy.md
+        section: "Data retention and deletion"
+    expected_control: null
+    ground_truth_answer: "The customer is the controller and we act only on their documented instruction; we do not respond to their end users directly. A request through the customer's designated contact is acknowledged within 5 business days and completed within 30 days, and production data is deleted within 30 days with backups expiring within a further 35 days."
+
+  # --------------------------------------------------------- exact token (5)
+  # The question hinges on a literal string -- a control ID, an algorithm name,
+  # a version number, an AWS service. Dense embeddings compress meaning and are
+  # weak here: a bare 'SC-28' scores 0.110, barely above noise. This band exists
+  # because the first version of this set had no question BM25 could win, which
+  # made the hybrid-search comparison unmeasurable. Added 2026-09-03.
+
+  - id: q_041
+    question: "SC-28"
+    difficulty: exact
+    category: control_mapping
+    expected_chunks:
+      - source: risk-management-policy.md
+        section: "Control mapping summary"
+    expected_control: SC-28
+    ground_truth_answer: "SC-28 is Protection of Information at Rest. It maps to the Information Security Policy, encryption at rest section."
+
+  - id: q_042
+    question: "Where is AES-256 used?"
+    difficulty: exact
+    category: encryption
+    expected_chunks:
+      - source: information-security-policy.md
+        section: "Encryption at rest"
+      - source: business-continuity-and-disaster-recovery-plan.md
+        section: "Backups"
+    expected_control: SC-28
+    ground_truth_answer: "AES-256 encrypts customer data at rest in production, covering S3, RDS and EBS, and it also encrypts backups, which use the same KMS customer-managed keys."
+
+  - id: q_043
+    question: "Do you support TLS 1.2?"
+    difficulty: exact
+    category: encryption
+    expected_chunks:
+      - source: information-security-policy.md
+        section: "Encryption in transit"
+    expected_control: SC-8
+    ground_truth_answer: "Yes. All client traffic uses TLS 1.2 or higher, and TLS 1.0 and 1.1 are disabled at the load balancer."
+
+  - id: q_044
+    question: "Do you use GuardDuty?"
+    difficulty: exact
+    category: network_security
+    expected_chunks:
+      - source: network-security-policy.md
+        section: "Intrusion detection"
+    expected_control: null
+    ground_truth_answer: "Yes. AWS GuardDuty findings and network flow logs are streamed to the logging account, and high severity findings page the on-call engineer as a Sev2 incident or higher."
+
+  - id: q_045
+    question: "What is logged to CloudTrail?"
+    difficulty: exact
+    category: logging
+    expected_chunks:
+      - source: vulnerability-management-policy.md
+        section: "Logging and monitoring"
+      - source: network-security-policy.md
+        section: "Remote access"
+    expected_control: AU-2
+    ground_truth_answer: "All production API calls are logged to AWS CloudTrail with log file validation enabled, retained 400 days. Just-in-time production access sessions are logged there too."
+
+  # -------------------------------------------------------- unanswerable (5)
+  # The corpus genuinely does not cover these. Correct behaviour is refusal
+  # with no invented policy. Three carry a lexical distractor: retrieval will
+  # return something plausible and adjacent, which is when hallucination is
+  # most likely. That is the point of the band.
+
+  - id: q_036
+    question: "Please provide your most recent SOC 2 Type II report."
+    difficulty: unanswerable
+    category: certifications
+    expected_chunks: []
+    expected_control: null
+    ground_truth_answer: null
+    distractor: true
+    why_unanswerable: "vendor-management-policy.md mentions SOC 2 Type II, but only as something we require of our vendors. Nothing in the corpus states that we hold one."
+
+  - id: q_037
+    question: "Are you FedRAMP authorized?"
+    difficulty: unanswerable
+    category: certifications
+    expected_chunks: []
+    expected_control: null
+    ground_truth_answer: null
+    distractor: false
+    why_unanswerable: "FedRAMP appears nowhere in the corpus and has no close lexical neighbour. This is the easy refusal; it is the control for the distractor cases."
+
+  - id: q_038
+    question: "Will you sign a HIPAA Business Associate Agreement?"
+    difficulty: unanswerable
+    category: certifications
+    expected_chunks: []
+    expected_control: null
+    ground_truth_answer: null
+    distractor: true
+    why_unanswerable: "data-privacy-policy.md covers GDPR, CCPA, a data processing agreement, and Standard Contractual Clauses. A model may generalise from DPA to BAA. It must not; HIPAA is never mentioned."
+
+  - id: q_039
+    question: "Do you run a public bug bounty program?"
+    difficulty: unanswerable
+    category: vulnerability_management
+    expected_chunks: []
+    expected_control: null
+    ground_truth_answer: null
+    distractor: true
+    why_unanswerable: "vulnerability-management-policy.md covers scanning and third-party penetration testing, which are adjacent but are not a bug bounty. Answering yes from that context is a false attestation."
+
+  - id: q_040
+    question: "What is the coverage limit on your cyber liability insurance?"
+    difficulty: unanswerable
+    category: risk_management
+    expected_chunks: []
+    expected_control: null
+    ground_truth_answer: null
+    distractor: false
+    why_unanswerable: "risk-management-policy.md covers risk acceptance and treatment but says nothing about insurance, and no dollar figure appears anywhere in the corpus."
