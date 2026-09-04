@@ -7,4 +7,4 @@ numpy>=2.0.0
 # dev
 pytest>=8.0.0
 pre-commit>=3.7.0
-ruff>=0.6.0
+ruff==0.6.9  # must match the pin in .pre-commit-config.yaml
