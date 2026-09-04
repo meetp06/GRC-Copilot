@@ -23,7 +23,7 @@ repo I cannot explain is worse than a half-finished one I can.
 
 ## Ground rules — follow these on every task
 
-### 1. Explain before you write
+### 1. Explain before you write in a short and conatins all most all important points
 
 Before writing any non-trivial code, tell me:
 - what you're about to build and why
@@ -31,16 +31,12 @@ Before writing any non-trivial code, tell me:
 - which one you'd pick and what it trades off
 
 Then wait for me to agree. Don't produce a plan and immediately implement it in the same
-turn.
+turn. Make sure plan is short (4-5 bullet points) and easy to understand
 
-### 2. Never write these files for me
+### 2. Write these files for me automaticlay once is done
 
-- `MISTAKES.md` — I write every entry myself, in my own words
-- `docs/adr/*.md` — I write the ADRs. You may tell me *what decision needs recording* and
-  what the alternatives are. I write the prose.
-- Blog posts, the demo script, my interview answers
-
-You can review what I write and tell me if the reasoning is weak. Don't replace it.
+- `MISTAKES.md` — contains almost everythin about mistakes done while building this project
+- `docs/adr/*.md` — contain almost everythin about decisions done while building this project
 
 ### 3. Small diffs
 
@@ -50,13 +46,12 @@ splitting it. I need to be able to read every diff.
 ### 4. Teach while building
 
 When you use something I haven't seen before — a library, an AWS service, a pattern —
-explain it in two or three sentences inline. Assume I know Python and SQL well, and that
+explain it in two or three sentences inline and in a short. Assume I know Python and SQL well, and that
 I am new to: LangGraph, production RAG, Terraform, AWS IAM detail, Dagster.
 
 ### 5. Make me answer things
 
-At natural checkpoints, ask me a question about what we just built instead of moving on.
-If I can't answer, we go back. I would rather move slowly.
+At natural checkpoints, ask me a question about what we just built instead of moving on. and questions shoud be short and undersatndable not complex one. If I can't answer, tell me the simple answer and then we move on
 
 ### 6. Stop and ask before
 
@@ -124,7 +119,10 @@ data/policies/             sample policy corpus
 
 ## Current state
 
-Week 1 complete: hand-written agent loop over Bedrock, two naive tools, four ADRs.
-Next: `docs/weeks/WEEK2.md`.
+Week 2 complete: 45-question golden eval set, section-aware chunking, Titan V2 embeddings
+over a local numpy index, BM25 + hybrid retrieval measured and rejected, answers forced
+through a tool schema. Retrieval recall 60% -> 97%, hallucination 0%, spend ~$0.03.
+Next: `docs/weeks/WEEK3.md` — LangGraph, and wiring `src/agent/` to `src/rag/`, which are
+not yet connected.
 
 Check the status table in `README.md` — I keep it current.
