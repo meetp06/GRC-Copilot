@@ -11,3 +11,7 @@ runs/
 
 # derived: rebuildable with `python -m src.rag.index build`
 data/index/
+
+# checkpoint database: run state, rebuildable, may contain customer text
+data/runs.sqlite
+data/*.sqlite

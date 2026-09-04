@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from langgraph.types import interrupt
+
 from src.graph.state import MAX_REVISIONS, QuestionState, RetrievedChunk
 from src.rag.answer import draft_answer
 from src.rag.index import VectorIndex
@@ -152,3 +154,57 @@ def finalise(state: QuestionState) -> dict:
         "status": "approved",
         "confidence": state.get("model_confidence", "medium"),
     }
+
+
+def human_review(state: QuestionState) -> dict:
+    """Stop the graph and wait for a person.
+
+    `interrupt()` raises out of the graph. LangGraph has already checkpointed
+    everything up to this point, so the process can exit, crash, or be killed
+    and the run resumes here later with no work repeated.
+
+    The dict passed to interrupt() is what the reviewer sees. It carries the
+    draft, the citations resolved to real document sections, and the verifier's
+    complaint if there was one -- everything needed to decide without opening
+    the corpus.
+
+    Resuming supplies a decision, which becomes this call's return value:
+
+        Command(resume={"action": "approve"})
+        Command(resume={"action": "edit", "answer": "..."})
+        Command(resume={"action": "reject"})
+    """
+    decision = interrupt(
+        {
+            "question_id": state.get("question_id"),
+            "question": state["question"],
+            "draft": state.get("draft"),
+            "answerable": state.get("answerable"),
+            "verified": state.get("verified"),
+            "critique": state.get("critique"),
+            "revisions": state.get("revision_count", 0),
+            "citations": [
+                f"{state['retrieved'][i - 1]['source']} :: {state['retrieved'][i - 1]['section']}"
+                for i in state.get("citations", [])
+                if 1 <= i <= len(state["retrieved"])
+            ],
+        }
+    )
+
+    action = (decision or {}).get("action", "reject")
+    if action == "approve":
+        return {"status": "approved", "reviewed_by_human": True}
+    if action == "edit":
+        return {
+            "status": "approved",
+            "draft": decision.get("answer", state.get("draft")),
+            "answerable": True,
+            "reviewed_by_human": True,
+            "edited_by_human": True,
+        }
+    return {"status": "rejected", "reviewed_by_human": True}
+
+
+def route_after_finalise(state: QuestionState) -> str:
+    """Auto-approved answers are done. Everything else waits for a person."""
+    return "human" if state.get("status") == "needs_review" else "done"

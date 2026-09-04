@@ -12,7 +12,9 @@ from unittest.mock import patch
 
 import pytest
 
-from src.graph.build import build_graph
+from src.graph.build import build_graph, resume, start
+from src.graph.checkpoint import open_checkpointer, thread_config
+from src.graph.review import _pending
 from src.graph.state import MAX_REVISIONS, QuestionState
 from src.rag.answer import Answer
 from src.rag.verify import Verdict
@@ -171,3 +173,86 @@ def test_state_survives_serialisation(state: QuestionState) -> None:
     would pass on objects the real checkpointer cannot store anyway. JSON is the
     stricter test."""
     assert json.loads(json.dumps(state)) == state
+
+
+# --- checkpointing and human review -----------------------------------------
+
+
+def _checkpointed(tmp_path):
+    """A graph whose state persists to a real SQLite file."""
+    return open_checkpointer(tmp_path / "runs.sqlite")
+
+
+def _start(checkpointer, answer=FAKE_ANSWER, verdict=GOOD_VERDICT, qid="t1"):
+    with (
+        patch("src.graph.nodes.draft_answer", return_value=answer),
+        patch("src.graph.nodes.verify_answer", return_value=verdict),
+    ):
+        return start("Do you encrypt data at rest?", qid, FakeIndex(), checkpointer)
+
+
+REFUSAL = Answer(
+    answerable=False,
+    answer="The policy corpus does not cover this.",
+    citations=[],
+    confidence="low",
+    retrieved=[],
+    input_tokens=100,
+    output_tokens=10,
+)
+
+
+def test_a_question_needing_review_pauses_instead_of_finishing(tmp_path) -> None:
+    cp = _checkpointed(tmp_path)
+    out = _start(cp, answer=REFUSAL)
+    assert "__interrupt__" in out, "the graph should have stopped for a human"
+
+
+def test_paused_state_is_readable_from_a_new_graph_instance(tmp_path) -> None:
+    """The reviewer runs a separate command, in a separate process, possibly
+    days later. Nothing may be held in memory between pausing and resuming."""
+    cp = _checkpointed(tmp_path)
+    _start(cp, answer=REFUSAL)
+
+    fresh = build_graph(FakeIndex(), checkpointer=cp)
+    snapshot = fresh.get_state(thread_config("t1"))
+    assert snapshot.next == ("human_review",)
+    assert snapshot.values["status"] == "needs_review"
+
+
+def test_resuming_does_not_repeat_paid_work(tmp_path) -> None:
+    """The reason for adopting a framework, asserted. Token counts must be
+    identical across the pause: retrieve, draft and verify already ran and were
+    already paid for, so resume must start at the interrupt, not the beginning."""
+    cp = _checkpointed(tmp_path)
+    _start(cp, answer=REFUSAL)
+
+    fresh = build_graph(FakeIndex(), checkpointer=cp)
+    before = fresh.get_state(thread_config("t1")).values["input_tokens"]
+
+    out = resume("t1", {"action": "approve"}, FakeIndex(), cp)
+    assert out["input_tokens"] == before
+    assert out["status"] == "approved"
+    assert out["reviewed_by_human"] is True
+
+
+def test_an_edit_replaces_the_answer_and_is_recorded_as_edited(tmp_path) -> None:
+    """'approved' alone cannot tell an auditor whether a person changed the
+    wording. That distinction is the product."""
+    cp = _checkpointed(tmp_path)
+    _start(cp, answer=REFUSAL)
+    out = resume("t1", {"action": "edit", "answer": "Corrected."}, FakeIndex(), cp)
+    assert out["draft"] == "Corrected."
+    assert out["edited_by_human"] is True
+
+
+def test_rejecting_clears_it_from_the_review_queue(tmp_path) -> None:
+    """Regression: _pending() once used one dict for both deduplication and
+    results, so a thread whose newest checkpoint was 'rejected' was never marked
+    seen and its older needs_review checkpoint resurfaced as pending."""
+    cp = _checkpointed(tmp_path)
+    _start(cp, answer=REFUSAL)
+    assert len(_pending(cp)) == 1
+
+    resume("t1", {"action": "reject"}, FakeIndex(), cp)
+    assert _pending(cp) == [], "a decided question must leave the queue"

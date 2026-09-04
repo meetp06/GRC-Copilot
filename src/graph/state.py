@@ -77,6 +77,12 @@ class QuestionState(TypedDict, total=False):
     confidence: Confidence
     status: Status
 
+    # --- human review (day 3) ---
+    # Kept separate from `status` because "approved" alone cannot tell an
+    # auditor whether a person looked at it. That distinction is the product.
+    reviewed_by_human: bool
+    edited_by_human: bool
+
     # --- accounting, so a resumed run can prove it did not pay twice ---
     input_tokens: int
     output_tokens: int
