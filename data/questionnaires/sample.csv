@@ -1,0 +1,51 @@
+id,question
+q_001,Do you encrypt customer data at rest?
+q_002,What TLS version is required for data in transit?
+q_003,How quickly do you remediate critical vulnerabilities?
+q_004,Do you perform an annual penetration test?
+q_005,Is multi-factor authentication enforced for access to production systems?
+q_006,How often are user access reviews performed?
+q_007,What is your recovery time objective (RTO) for the production service?
+q_008,How long are production audit logs retained?
+q_009,Do employees receive security awareness training?
+q_010,Is code review required before changes are merged to production?
+q_011,Is client information protected while it is being stored on your systems?
+q_012,"When a staff member leaves the company, how fast is their entry to systems shut off?"
+q_013,What happens to our information once we stop using your service?
+q_014,How soon would we hear from you if our records were exposed?
+q_015,Do your engineers get unrestricted rights over live systems by default?
+q_016,"In a regional outage, how much of our recent work could be lost?"
+q_017,Are new joiners vetted before they start work?
+q_018,Do you check outside companies before letting them touch our data?
+q_019,How do you keep passwords and API keys out of your codebase?
+q_020,Can your staff keep our records on their own personal laptops?
+q_021,Is your live environment kept apart from where developers experiment?
+q_022,Where in the world does our information physically live?
+q_023,Do you have protection against traffic floods aimed at your site?
+q_024,How do you know which machines belong to the company?
+q_025,Will you tell us before handing our data to another company?
+q_026,"When an employee leaves, what happens to both their system access and their company laptop?"
+q_027,A critical vulnerability is disclosed in a third-party library you use. Walk us through how you would detect it and get the fix deployed.
+q_028,Are your backups encrypted to the same standard as your production data?
+q_029,"If one of your vendors is breached, how quickly must they tell you, and how quickly would you then tell us?"
+q_030,"How do your engineers connect to production, and do you use a VPN?"
+q_031,"Which NIST 800-53 control covers your encryption at rest, and which policy is the evidence for it?"
+q_032,A GuardDuty alert fires at 2am. What severity does it get and who is woken up?
+q_033,Can a single engineer push a change to production on their own?
+q_034,"If we ask you to delete our data, how long could copies of it survive anywhere in your systems?"
+q_035,"One of our end users asks us to delete their personal data. Who acts on that, and how long does it take?"
+q_041,SC-28
+q_042,Where is AES-256 used?
+q_043,Do you support TLS 1.2?
+q_044,Do you use GuardDuty?
+q_045,What is logged to CloudTrail?
+q_036,Please provide your most recent SOC 2 Type II report.
+q_037,Are you FedRAMP authorized?
+q_038,Will you sign a HIPAA Business Associate Agreement?
+q_039,Do you run a public bug bounty program?
+q_040,What is the coverage limit on your cyber liability insurance?
+q_046,Describe your process for granting and revoking administrative access to production.
+q_047,What is your target time to restore service after a complete regional failure?
+q_048,"Do you notify customers before engaging a new subprocessor, and how much notice is given?"
+q_049,"Are laptops issued to staff encrypted, and what happens to them when someone leaves?"
+q_050,"Do you maintain cyber liability insurance, and at what coverage level?"
