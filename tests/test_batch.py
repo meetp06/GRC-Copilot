@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
-from src.graph.batch import collect, export, read_questionnaire, run_one
+from src.graph.batch import collect, csv_safe, export, read_questionnaire, run_one
 from src.graph.build import build_graph
 from src.graph.checkpoint import open_checkpointer
 from src.rag.answer import Answer
@@ -118,3 +118,55 @@ def test_collect_reports_a_never_run_question_as_not_run(
         index_cls.load.return_value = FakeIndex()
         rows = collect(questionnaire)
     assert rows[0]["status"] == "not_run"
+
+
+# --- CSV injection ----------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "=cmd|'/c calc'!A1",
+        "+1+1",
+        "-2+3",
+        "@SUM(1+1)",
+        "\tleading tab",
+        "\rleading carriage return",
+    ],
+)
+def test_formula_cells_are_neutralised(payload: str) -> None:
+    """Excel and Sheets evaluate a cell starting with any of these. This export
+    is opened by a customer's security team, and CLAUDE.md says to treat
+    questionnaire input as hostile -- a formula planted in an uploaded question
+    would otherwise round-trip into their spreadsheet."""
+    assert csv_safe(payload).startswith("'")
+    assert csv_safe(payload)[1:] == payload
+
+
+def test_ordinary_text_is_untouched() -> None:
+    """The mitigation must not mangle every answer it sees."""
+    assert csv_safe("Yes, we encrypt customer data at rest using AES-256.") == (
+        "Yes, we encrypt customer data at rest using AES-256."
+    )
+    assert csv_safe("TLS 1.2 or higher.") == "TLS 1.2 or higher."
+    assert csv_safe(None) == ""
+
+
+def test_a_malicious_question_cannot_round_trip_into_the_export(app, tmp_path) -> None:
+    """End to end: a formula in the questionnaire must not come back out live."""
+    path = tmp_path / "hostile.csv"
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["id", "question"])
+        writer.writeheader()
+        writer.writerow({"id": "h1", "question": '=HYPERLINK("http://evil","click")'})
+
+    with (
+        patch("src.graph.batch.open_checkpointer", return_value=app.checkpointer),
+        patch("src.graph.batch.VectorIndex") as index_cls,
+    ):
+        index_cls.load.return_value = FakeIndex()
+        out = tmp_path / "answers.csv"
+        export(path, out)
+
+    written = list(csv.DictReader(out.open(encoding="utf-8")))
+    assert written[0]["question"].startswith("'=HYPERLINK")

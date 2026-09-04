@@ -178,6 +178,30 @@ def report(path: Path) -> None:
             console.print(f"    {r['id']}  {r['question'][:60]}")
 
 
+# Excel and Google Sheets evaluate a cell as a formula when it begins with one
+# of these. A cell reading =cmd|'/c calc'!A1 can execute on the machine that
+# opens the file, and DDE payloads have been used this way for real.
+#
+# This export is handed to a customer's security team, who open it in Excel, and
+# CLAUDE.md says to treat questionnaire input as hostile: a formula planted in
+# an uploaded question round-trips through here untouched, and a policy document
+# under an attacker's control can steer the model into emitting one.
+FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
+
+
+def csv_safe(value: object) -> str:
+    """Neutralise a cell that a spreadsheet would treat as a formula.
+
+    Prefixing with an apostrophe is the standard mitigation: spreadsheets read
+    it as "this is text", show the original content, and never evaluate it.
+    Quoting alone does not help -- a quoted cell is still parsed as a formula.
+    """
+    text = "" if value is None else str(value)
+    if text.startswith(FORMULA_PREFIXES):
+        return "'" + text
+    return text
+
+
 def export(path: Path, out_path: Path) -> None:
     """Write answers back out, in a shape a person can paste into the buyer's sheet."""
     rows = collect(path)
@@ -199,13 +223,13 @@ def export(path: Path, out_path: Path) -> None:
         for r in rows:
             writer.writerow(
                 {
-                    "id": r["id"],
-                    "question": r["question"],
-                    "answer": r["answer"],
+                    "id": csv_safe(r["id"]),
+                    "question": csv_safe(r["question"]),
+                    "answer": csv_safe(r["answer"]),
                     # Semicolons, not commas: these go in one CSV cell.
-                    "citations": "; ".join(r["citations"]),
-                    "status": r["status"],
-                    "confidence": r["confidence"],
+                    "citations": csv_safe("; ".join(r["citations"])),
+                    "status": csv_safe(r["status"]),
+                    "confidence": csv_safe(r["confidence"]),
                     "reviewed_by_human": r["reviewed_by_human"],
                     "edited_by_human": r["edited_by_human"],
                 }
