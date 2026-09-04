@@ -63,9 +63,11 @@ ANSWER_TOOL: dict[str, Any] = {
                     "answer": {
                         "type": "string",
                         "description": (
-                            "The answer, drawn only from the extracts. If answerable "
-                            "is false, state plainly that the policy corpus does not "
-                            "cover this and say what would be needed."
+                            "The answer, drawn only from the extracts. Written as the "
+                            "company being asked: say 'we' and 'our', never 'you' or "
+                            "'your' -- this text is sent to the customer who asked. If "
+                            "answerable is false, state plainly that the policy corpus "
+                            "does not cover this."
                         ),
                     },
                     "citations": {

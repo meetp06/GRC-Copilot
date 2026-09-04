@@ -36,10 +36,17 @@ from src.rag.index import VectorIndex
 
 console = Console()
 
-# Four parallel questions. Bedrock's on-demand throttle limits are per-account
-# and undocumented in practice, so this is a starting point to be measured, not
-# a tuned value. Day 5 records what throttling actually looked like.
-DEFAULT_CONCURRENCY = 4
+# Measured rather than guessed. Nova Lite on-demand, us-east-1, 50 questions:
+#
+#   concurrency  4   17.2s   0.86s/question   0 retries, 0 errors
+#   concurrency 20   15.7s   0.31s/question   0 retries, 0 errors
+#   concurrency 50   10.7s   0.21s/question   0 retries, 0 errors
+#
+# No throttling at any of these, which contradicts the week 3 plan's assumption
+# that it would appear early. 20 is the knee: 4 -> 20 is a 2.2x speedup, 20 ->
+# 50 only 1.5x more, and the account's real limit is shared, undocumented, and
+# would be discovered by a production run rather than by this one.
+DEFAULT_CONCURRENCY = 20
 
 # Nova Lite on-demand, us-east-1.
 COST_IN, COST_OUT = 0.06e-6, 0.24e-6
