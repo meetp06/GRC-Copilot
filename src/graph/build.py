@@ -4,14 +4,20 @@
 
 Day 1 topology is deliberately boring -- two nodes in a line:
 
-    START -> retrieve -> draft -> END
+    START -> retrieve -> draft -> verify -> finalise -> END
+                           ^         |
+                           +---------+   at most MAX_REVISIONS times
 
-It does exactly what week 2 did. The point of shipping it this shape is that the
-week 2 eval set can prove the port changed nothing before any new behaviour is
-added on top. A framework migration that also adds features is a migration you
-cannot debug.
+The verifier is a separate agent, not the drafter checking itself. Week 2
+measured why: when retrieval returns a plausible distractor, the drafter's own
+`answerable` flag and its answer text both say the answer is fine, because the
+drafter is the thing that was fooled. See ADR-0008.
 
-The verifier, the reflection loop and the human interrupt arrive on days 2 and 3.
+The retry edge is bounded. An unbounded critique-redraft cycle is the week 1
+runaway failure one level up, and the counter that stops it lives in state where
+no model can reach it.
+
+The human interrupt arrives on day 3.
 """
 
 from __future__ import annotations
@@ -21,7 +27,13 @@ import sys
 
 from langgraph.graph import END, START, StateGraph
 
-from src.graph.nodes import make_draft, make_retrieve
+from src.graph.nodes import (
+    finalise,
+    make_draft,
+    make_retrieve,
+    make_verify,
+    route_after_verify,
+)
 from src.graph.state import QuestionState
 from src.rag.index import VectorIndex
 
@@ -34,11 +46,21 @@ def build_graph(index: VectorIndex, model_id: str | None = None):
     """
     graph = StateGraph(QuestionState)
     graph.add_node("retrieve", make_retrieve(index))
-    graph.add_node("draft", make_draft(index, model_id=model_id))
+    graph.add_node("draft", make_draft(model_id=model_id))
+    graph.add_node("verify", make_verify(model_id=model_id))
+    graph.add_node("finalise", finalise)
 
     graph.add_edge(START, "retrieve")
     graph.add_edge("retrieve", "draft")
-    graph.add_edge("draft", END)
+    graph.add_edge("draft", "verify")
+    graph.add_conditional_edges(
+        "verify",
+        route_after_verify,
+        # "retry" is the only edge that goes backwards. Everything else moves
+        # toward a terminal status, so the graph cannot cycle any other way.
+        {"retry": "draft", "accept": "finalise", "give_up": "finalise"},
+    )
+    graph.add_edge("finalise", END)
 
     return graph.compile()
 
@@ -66,6 +88,8 @@ def main() -> None:
             {
                 "status": state["status"],
                 "answerable": state["answerable"],
+                "verified": state["verified"],
+                "revisions": state["revision_count"],
                 "confidence": state["confidence"],
                 "answer": state["draft"],
                 "cited": [

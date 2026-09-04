@@ -13,8 +13,9 @@ from unittest.mock import patch
 import pytest
 
 from src.graph.build import build_graph
-from src.graph.state import QuestionState
+from src.graph.state import MAX_REVISIONS, QuestionState
 from src.rag.answer import Answer
+from src.rag.verify import Verdict
 
 
 class FakeHit:
@@ -54,11 +55,24 @@ FAKE_ANSWER = Answer(
 )
 
 
-@pytest.fixture
-def state() -> QuestionState:
-    index = FakeIndex()
-    with patch("src.graph.nodes.answer_question", return_value=FAKE_ANSWER):
-        app = build_graph(index)
+GOOD_VERDICT = Verdict(
+    supported=True, unsupported_claims=[], critique="", input_tokens=50, output_tokens=5
+)
+BAD_VERDICT = Verdict(
+    supported=False,
+    unsupported_claims=["Keys rotate every 90 days."],
+    critique="The extracts say annual rotation, not 90 days.",
+    input_tokens=50,
+    output_tokens=20,
+)
+
+
+def run_graph(answer=FAKE_ANSWER, verdict=GOOD_VERDICT) -> QuestionState:
+    with (
+        patch("src.graph.nodes.draft_answer", return_value=answer),
+        patch("src.graph.nodes.verify_answer", return_value=verdict),
+    ):
+        app = build_graph(FakeIndex())
         return app.invoke(
             {
                 "question": "Do you encrypt data at rest?",
@@ -66,6 +80,11 @@ def state() -> QuestionState:
                 "status": "retrieving",
             }
         )
+
+
+@pytest.fixture
+def state() -> QuestionState:
+    return run_graph()
 
 
 def test_graph_runs_both_nodes_and_reaches_a_terminal_status(
@@ -94,18 +113,52 @@ def test_citations_resolve_to_retrieved_passages(state: QuestionState) -> None:
     assert cited["source"] == "information-security-policy.md"
 
 
-def test_token_counts_accumulate_rather_than_overwrite(state: QuestionState) -> None:
-    """A resumed run must be able to prove it did not pay for the same work
-    twice, which needs a running total rather than the last node's usage."""
-    assert state["input_tokens"] == 100
-    assert state["output_tokens"] == 10
+def test_token_counts_accumulate_across_nodes(state: QuestionState) -> None:
+    """Drafter and verifier both spend tokens. A running total is what lets a
+    resumed run prove it did not pay for the same work twice."""
+    assert state["input_tokens"] == 150  # 100 draft + 50 verify
+    assert state["output_tokens"] == 15  # 10 draft + 5 verify
 
 
-def test_reflection_counter_starts_bounded(state: QuestionState) -> None:
-    """Day 2 adds a drafter/verifier loop. Without this counter the two argue
-    until the token budget is gone -- the week 1 runaway, one level up."""
+def test_a_verified_draft_is_approved_without_revisions(state: QuestionState) -> None:
+    assert state["verified"] is True
     assert state["revision_count"] == 0
-    assert state["verified"] is False
+    assert state["status"] == "approved"
+
+
+def test_reflection_loop_is_bounded() -> None:
+    """The verifier rejects every attempt. Without the cap the drafter and
+    verifier rewrite and reject each other until the budget is gone -- the week 1
+    runaway failure, one level up between two agents."""
+    state = run_graph(verdict=BAD_VERDICT)
+    assert state["revision_count"] == MAX_REVISIONS
+    assert (
+        state["status"] == "needs_review"
+    ), "a draft that never verified must not auto-approve"
+
+
+def test_an_unverified_draft_is_never_auto_approved() -> None:
+    """The safe default in a compliance product is a human queue, not a send."""
+    state = run_graph(verdict=BAD_VERDICT)
+    assert state["confidence"] == "low"
+
+
+def test_a_refusal_skips_verification_entirely() -> None:
+    """There is no claim to check in a refusal, and asking a verifier to confirm
+    the absence of evidence invites it to argue the answer back into existence.
+    It also saves a model call on every refusal."""
+    refusal = Answer(
+        answerable=False,
+        answer="The policy corpus does not cover this.",
+        citations=[],
+        confidence="low",
+        retrieved=[],
+        input_tokens=100,
+        output_tokens=10,
+    )
+    state = run_graph(answer=refusal)
+    assert state["status"] == "needs_review"
+    assert state["input_tokens"] == 100, "verifier should not have been called"
 
 
 def test_state_survives_serialisation(state: QuestionState) -> None:

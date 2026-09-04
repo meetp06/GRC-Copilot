@@ -31,6 +31,11 @@ Status = Literal[
 
 Confidence = Literal["high", "medium", "low"]
 
+# How many times the verifier may send a draft back before the question goes to
+# a human instead. Two is a guess, not a measurement -- day 5 checks how often
+# the second attempt actually succeeds and whether a third would earn its cost.
+MAX_REVISIONS = 2
+
 
 class RetrievedChunk(TypedDict):
     """One passage handed to the drafter.
