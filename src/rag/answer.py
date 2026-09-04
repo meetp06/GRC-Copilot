@@ -63,9 +63,11 @@ ANSWER_TOOL: dict[str, Any] = {
                     "answer": {
                         "type": "string",
                         "description": (
-                            "The answer, drawn only from the extracts. If answerable "
-                            "is false, state plainly that the policy corpus does not "
-                            "cover this and say what would be needed."
+                            "The answer, drawn only from the extracts. Written as the "
+                            "company being asked: say 'we' and 'our', never 'you' or "
+                            "'your' -- this text is sent to the customer who asked. If "
+                            "answerable is false, state plainly that the policy corpus "
+                            "does not cover this."
                         ),
                     },
                     "citations": {
@@ -115,12 +117,19 @@ class Answer:
         return self.input_tokens * 0.06e-6 + self.output_tokens * 0.24e-6
 
 
-def build_prompt(question: str, hits: list) -> str:
+def build_prompt(question: str, hits: list, critique: str | None = None) -> str:
     extracts = "\n\n".join(
         f"[{i}] {h.source} :: {h.section}\n{h.text}"
         for i, h in enumerate(hits, start=1)
     )
-    return f"POLICY EXTRACTS\n\n{extracts}\n\nQUESTION\n\n{question}"
+    prompt = f"POLICY EXTRACTS\n\n{extracts}\n\nQUESTION\n\n{question}"
+    if critique:
+        prompt += (
+            f"\n\nA REVIEWER REJECTED YOUR PREVIOUS ANSWER\n\n{critique}\n\n"
+            "Write a new answer that fixes this. If the extracts genuinely do not "
+            "support an answer, set answerable to false rather than trying again."
+        )
+    return prompt
 
 
 def answer_question(
@@ -131,8 +140,30 @@ def answer_question(
     model_id: str | None = None,
     system_prompt: str | None = None,
 ) -> Answer:
-    """Retrieve, then answer with the schema enforced by a tool call."""
+    """Retrieve, then draft. The one-shot path, used by the CLI and the evals."""
     hits = index.search(question, top_k=top_k)
+    return draft_answer(question, hits, model_id=model_id, system_prompt=system_prompt)
+
+
+def draft_answer(
+    question: str,
+    hits: list,
+    *,
+    model_id: str | None = None,
+    system_prompt: str | None = None,
+    critique: str | None = None,
+) -> Answer:
+    """Draft an answer from passages already retrieved.
+
+    Split out from answer_question so the graph can retrieve once and draft
+    several times: a verifier that rejects a draft sends it back here with a
+    critique, and re-running retrieval on every attempt would pay for the same
+    embedding repeatedly and could return different passages mid-loop.
+
+    `critique` is the verifier's complaint about the previous attempt. It is
+    appended to the user message rather than the system prompt, because it is
+    feedback about this specific draft, not a standing rule.
+    """
     model_id = model_id or os.environ.get("BEDROCK_MODEL_ID", DEFAULT_MODEL_ID)
     client = boto3.client(
         "bedrock-runtime", region_name=os.environ.get("AWS_REGION", "us-east-1")
@@ -142,7 +173,10 @@ def answer_question(
         modelId=model_id,
         system=[{"text": system_prompt or SYSTEM_PROMPT}],
         messages=[
-            {"role": "user", "content": [{"text": build_prompt(question, hits)}]}
+            {
+                "role": "user",
+                "content": [{"text": build_prompt(question, hits, critique)}],
+            }
         ],
         toolConfig={
             "tools": [ANSWER_TOOL],

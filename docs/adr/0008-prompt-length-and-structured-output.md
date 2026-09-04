@@ -37,6 +37,32 @@ schema. The only variable was the system prompt.
 
 Raw runs in `evals/results/`.
 
+### Amendment, 2026-09-04: these were single runs
+
+Week 3 measured this pipeline's run-to-run variance by running one identical
+config twice. Within a single process the two runs agreed on all 45 questions.
+Across processes, the same config scored 84% and then 87% — a drift of roughly
+two questions, despite `temperature=0.0`.
+
+Every row in the table above is a single run, so each carries error bars of
+about +/-2 questions. That changes what can honestly be claimed:
+
+- **naive vs concise, 100% against 91%** — nine points, comfortably outside the
+  noise. The finding stands.
+- **concise vs strict, 91% against 87%** — four points, close enough to the
+  noise floor that it is not a safe conclusion. The *direction* was consistent
+  with the q_025 instruction-quoting failure, which is a qualitative
+  observation rather than a statistical one, and that is the honest strength of
+  the claim.
+- **hallucination 0% across all three** — a floor, not a difference. Unaffected.
+
+The decision does not change: concise ships, because the naive prompt's 20%
+uncited answers is a large and unambiguous defect. But "a page of rules is
+measurably worse than three sentences" is an overclaim from this data, and
+would need repeated runs to support.
+
+Logged as MISTAKES.md entry 18.
+
 ## Alternatives considered
 
 ### naive — one sentence

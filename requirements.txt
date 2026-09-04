@@ -3,6 +3,8 @@ python-dotenv>=1.0.0
 rich>=13.0.0
 PyYAML>=6.0.0
 numpy>=2.0.0
+langgraph>=1.2.11
+langgraph-checkpoint-sqlite>=3.1.1   # durable state so a paused run survives a crash
 
 # dev
 pytest>=8.0.0
