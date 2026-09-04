@@ -108,8 +108,9 @@ not the instructions. Making `answerable` a required boolean forces that decisio
 prose is written. The naive prompt's 100% is a trap: a fifth of its answers cite nothing, and
 an uncited answer cannot survive an auditor.
 
-Longer prompts made this model *worse*, monotonically. Raw runs in
-[`evals/results/`](evals/results/).
+Longer prompts made this model *worse*, monotonically. Raw runs in [`evals/results/`](evals/results/).
+
+The four decisions behind these numbers: [ADR-0005 chunking](docs/adr/0005-chunking-strategy.md), [ADR-0006 vector store](docs/adr/0006-vector-store.md), [ADR-0007 hybrid rejected](docs/adr/0007-hybrid-retrieval-rejected.md), [ADR-0008 prompt length](docs/adr/0008-prompt-length-and-structured-output.md).
 
 | Measurement | Result |
 |---|---|
