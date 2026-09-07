@@ -44,7 +44,7 @@ from typing import Annotated
 from fastapi import Body, FastAPI, File, HTTPException, UploadFile
 from pydantic import BaseModel, Field
 
-from src.api import jobs
+from src.api import jobs, telemetry
 from src.graph.build import build_graph, resume
 from src.graph.checkpoint import open_checkpointer, thread_config
 from src.graph.controls import controls_for
@@ -174,19 +174,30 @@ def run_job(job_id: str, rows: list[dict]) -> None:
     graph = build_graph(index(), checkpointer=checkpointer)
     jobs.mark(conn, job_id, status="running")
 
+    metrics = telemetry.connect()
     completed = needs_review = failed = 0
     for row in rows:
         try:
-            out = graph.invoke(
-                {
-                    "question": row["question"],
-                    "question_id": row["id"],
-                    "status": "retrieving",
-                },
-                config=thread_config(row["id"]),
-            )
+            with telemetry.timed() as elapsed:
+                out = graph.invoke(
+                    {
+                        "question": row["question"],
+                        "question_id": row["id"],
+                        "status": "retrieving",
+                    },
+                    config=thread_config(row["id"]),
+                )
             if "__interrupt__" in out:
                 needs_review += 1
+            # Read the settled state rather than the invoke() return: an
+            # interrupted run returns the interrupt payload, not the counters.
+            state = graph.get_state(thread_config(row["id"])).values or {}
+            telemetry.record(
+                metrics,
+                {**state, "question_id": row["id"]},
+                elapsed["ms"],
+                job_id=job_id,
+            )
         except Exception:
             # Deliberately not logging the exception text: it can contain the
             # prompt, which contains customer policy content.

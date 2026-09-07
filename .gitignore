@@ -31,3 +31,4 @@ data/ontology/*.json
 data/ontology/*.sqlite
 
 data/jobs.sqlite
+data/telemetry.sqlite

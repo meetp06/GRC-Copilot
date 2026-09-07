@@ -130,3 +130,63 @@ def test_approving_an_unknown_question_is_404(client) -> None:
         build.return_value.get_state.return_value.values = {}
         response = client.post("/reviews/nope/approve", json={})
     assert response.status_code == 404
+
+
+# --- telemetry --------------------------------------------------------------
+
+
+def test_telemetry_records_outcomes_not_content(tmp_path) -> None:
+    """This table is read in a support session. CLAUDE.md's rule about never
+    logging documents applies to durable state, so no column may hold the
+    question, the prompt, or the answer."""
+    from src.api import telemetry
+
+    conn = telemetry.connect(tmp_path / "t.sqlite")
+    columns = {r[1] for r in conn.execute("PRAGMA table_info(run)").fetchall()}
+    forbidden = {"question", "answer", "draft", "prompt", "text", "retrieved"}
+    assert not (
+        columns & forbidden
+    ), f"telemetry must not store content: {columns & forbidden}"
+
+
+def test_telemetry_never_raises_into_the_caller(tmp_path) -> None:
+    """The answer has already been produced and paid for by the time this runs.
+    Telemetry that can break a run is worse than no telemetry."""
+    from src.api import telemetry
+
+    conn = telemetry.connect(tmp_path / "t.sqlite")
+    conn.execute("DROP TABLE run")
+    conn.commit()
+    telemetry.record(conn, {"question_id": "q1"}, 100)  # must not raise
+
+
+def test_summary_reports_p95_not_just_an_average(tmp_path) -> None:
+    """An average latency hides the tail, and the tail is what a user waiting on
+    a 200-question run actually experiences."""
+    from src.api import telemetry
+
+    conn = telemetry.connect(tmp_path / "t.sqlite")
+    for i, ms in enumerate([100] * 19 + [9000]):
+        telemetry.record(conn, {"question_id": f"q{i}", "answerable": True}, ms)
+
+    s = telemetry.summary(conn)
+    assert s["runs"] == 20
+    assert s["median_ms"] == 100
+    assert s["p95_ms"] == 9000, "p95 must surface the outlier the mean would bury"
+
+
+def test_cost_is_computed_from_tokens_not_guessed(tmp_path) -> None:
+    from src.api import telemetry
+
+    conn = telemetry.connect(tmp_path / "t.sqlite")
+    telemetry.record(
+        conn,
+        {
+            "question_id": "q1",
+            "answerable": True,
+            "input_tokens": 1_000_000,
+            "output_tokens": 0,
+        },
+        100,
+    )
+    assert abs(telemetry.summary(conn)["usd_total"] - 0.06) < 1e-9
