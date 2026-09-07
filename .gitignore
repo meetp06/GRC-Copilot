@@ -25,3 +25,7 @@ pdf_data/
 tmp*/
 history/
 logs/
+
+# ontology: 10MB NIST catalog (re-downloadable) and derived db
+data/ontology/*.json
+data/ontology/*.sqlite

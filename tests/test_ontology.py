@@ -1,0 +1,135 @@
+"""Ontology tests. Synthetic catalog, in-memory SQLite, no network, no cost."""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from src.ontology.crosswalk import SOC2_MAPPINGS
+from src.ontology.crosswalk import load as load_crosswalk
+from src.ontology.store import (
+    connect,
+    load_catalog,
+    load_policy_sections,
+    walk_controls,
+)
+
+MINI_CATALOG = {
+    "catalog": {
+        "groups": [
+            {
+                "id": "ac",
+                "title": "Access Control",
+                "controls": [
+                    {
+                        "id": "ac-2",
+                        "title": "Account Management",
+                        "props": [{"name": "label", "value": "AC-2"}],
+                        "parts": [
+                            {
+                                "name": "statement",
+                                "parts": [
+                                    {"name": "a", "prose": "Define account types."},
+                                    {"name": "b", "prose": "Review accounts."},
+                                ],
+                            }
+                        ],
+                        "controls": [
+                            {
+                                "id": "ac-2.1",
+                                "title": "Automated Account Management",
+                                "props": [{"name": "label", "value": "AC-2(1)"}],
+                                "parts": [
+                                    {"name": "statement", "prose": "Automate it."}
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+    }
+}
+
+
+@pytest.fixture
+def db(tmp_path):
+    conn = connect(tmp_path / "o.sqlite")
+    path = tmp_path / "cat.json"
+    path.write_text(json.dumps(MINI_CATALOG), encoding="utf-8")
+    load_catalog(conn, path)
+    return conn
+
+
+def test_enhancements_are_linked_to_their_base_control(db) -> None:
+    """AC-2(1) is a stricter variant of AC-2, kept as a self-reference so
+    'AC-2 and everything under it' is one query rather than a string prefix
+    match on the id."""
+    row = db.execute("SELECT parent_id FROM control WHERE id='ac-2.1'").fetchone()
+    assert row["parent_id"] == "ac-2"
+    base = db.execute("SELECT parent_id FROM control WHERE id='ac-2'").fetchone()
+    assert base["parent_id"] is None
+
+
+def test_nested_statement_parts_are_flattened(db) -> None:
+    """An OSCAL statement is a tree of lettered and numbered items. Reading only
+    the top-level prose would store an empty statement for most controls."""
+    row = db.execute("SELECT statement FROM control WHERE id='ac-2'").fetchone()
+    assert "Define account types." in row["statement"]
+    assert "Review accounts." in row["statement"]
+
+
+def test_the_human_readable_label_is_kept(db) -> None:
+    """'ac-2' is the id; 'AC-2' is what a questionnaire and an auditor write."""
+    row = db.execute("SELECT label FROM control WHERE id='ac-2'").fetchone()
+    assert row["label"] == "AC-2"
+
+
+def test_policy_sections_carry_their_review_date(db, tmp_path) -> None:
+    """A policy last reviewed in 2018 is not current evidence. The date has to
+    survive ingestion for that to be enforceable later."""
+    corpus = tmp_path / "corpus"
+    corpus.mkdir()
+    (corpus / "p.md").write_text(
+        "# Policy\n\n**Source:** p.pdf · **Last reviewed:** 2/22/2018\n\n"
+        "## Access\n\nAccess is least privilege.\n",
+        encoding="utf-8",
+    )
+    assert load_policy_sections(db, corpus) == 1
+    row = db.execute("SELECT section, review_date FROM policy_section").fetchone()
+    assert row["section"] == "Access"
+    assert row["review_date"] == "2/22/2018"
+
+
+def test_a_mapping_to_an_unknown_control_is_reported_not_dropped(db) -> None:
+    """A typo in a control id would silently drop the mapping and understate
+    coverage -- the same fail-open shape as the git-secrets bug in week 1."""
+    _, unknown = load_crosswalk(db)
+    assert unknown, "the mini catalog has one control, so most mappings are unknown"
+    assert all("->" in u for u in unknown)
+
+
+def test_every_crosswalk_criterion_maps_to_at_least_one_control() -> None:
+    """A criterion with no controls behind it would report as a permanent gap
+    and be indistinguishable from genuinely missing policy."""
+    empty = [c for c, (_, ids) in SOC2_MAPPINGS.items() if not ids]
+    assert not empty
+
+
+def test_crosswalk_uses_base_controls_only() -> None:
+    """Enhancement ids contain a dot. A policy that satisfies AC-2 says nothing
+    about whether AC-2(1) is met, so mapping to enhancements would manufacture
+    coverage."""
+    with_dots = [
+        (c, i) for c, (_, ids) in SOC2_MAPPINGS.items() for i in ids if "." in i
+    ]
+    assert not with_dots
+
+
+def test_walk_controls_returns_parents_before_children() -> None:
+    """The table has a self-referencing foreign key, so a child inserted before
+    its parent would fail on a database that enforces them."""
+    controls = walk_controls(MINI_CATALOG["catalog"]["groups"][0]["controls"], "ac")
+    ids = [c.id for c in controls]
+    assert ids.index("ac-2") < ids.index("ac-2.1")
