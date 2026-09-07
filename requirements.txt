@@ -6,6 +6,8 @@ numpy>=2.0.0
 langgraph>=1.2.11
 langgraph-checkpoint-sqlite>=3.1.1   # durable state so a paused run survives a crash
 pdfplumber>=0.11.0                   # PDF text + table extraction; tables are a week 4 problem
+dagster>=1.13.0                      # ingestion as assets -- oversized today, see ADR-0012
+dagster-webserver>=1.13.0            # dagster dev UI, local only
 
 # dev
 pytest>=8.0.0

@@ -19,3 +19,9 @@ data/*.sqlite
 # parsed output and source PDFs: derived / third-party, rebuildable
 data/policies_real/
 pdf_data/
+
+# dagster local run storage
+.dagster_home/
+tmp*/
+history/
+logs/
