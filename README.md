@@ -193,14 +193,21 @@ plus a hand-built SOC 2 crosswalk.
 
 | Report | Result |
 |---|---|
-| NIST controls with no policy behind them | **274 of 324** |
-| SOC 2 criteria with no policy at all | **15 of 37** |
+| NIST controls with no policy behind them | **311 of 324** |
+| SOC 2 criteria with no policy at all | **24 of 37** |
 | `"Do you have an incident response plan?"` | → IR-04, IR-08 → CC7.3, CC7.4, CC7.5 |
 
 That last row is the product claim: answer once, and the same answer serves a NIST
 questionnaire and a SOC 2 one. Every machine-proposed mapping stays unconfirmed until a named
 person accepts it — an embedding score is not a basis for telling an auditor a control is
 satisfied.
+
+The mapper is scored against [a labelled set](evals/control_mapping_set.yaml), not eyeballed.
+At the threshold originally shipped it was **24% precise** — 3 of every 4 mappings wrong — and
+the first gap figures here said 274 and 15 because those bad edges counted as coverage.
+Measured and retuned to 0.50: **78% precision**, false positives 37 → 2, at the cost of recall
+falling 38% → 22%. That trade is deliberate: a missed mapping appears as a gap someone fixes,
+a wrong one appears as coverage nobody rechecks.
 
 **Week 5 — three ways in.**
 

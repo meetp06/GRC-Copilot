@@ -38,10 +38,22 @@ from src.rag.embeddings import embed_texts
 
 console = Console()
 
-# Below this cosine similarity a proposal is noise. Calibrated against the
-# observed range: real matches here run 0.45-0.70, and everything under 0.40 was
-# a control and a section that merely share compliance vocabulary.
-MIN_CONFIDENCE = 0.40
+# Measured against evals/control_mapping_set.yaml, not chosen by eye. The first
+# value here was 0.40, picked by looking at the highest-scoring proposals -- which
+# showed me the good ones and hid the rest. Scored properly:
+#
+#   threshold   precision   recall    F1   false positives
+#      0.40          24%      38%   0.30       37
+#      0.45          42%      31%   0.36       14
+#      0.50          78%      22%   0.34        2
+#      0.55          75%       9%   0.17        1
+#
+# 0.50 despite 0.45 having a marginally better F1, because F1 treats the two
+# errors as equal and this product does not. A missed mapping appears in the gap
+# report as a control with no policy, which is conservative and gets fixed. A
+# wrong mapping appears as coverage that does not exist, and nobody looks at it
+# again. Claiming a control you cannot evidence is the failure that matters.
+MIN_CONFIDENCE = 0.50
 
 # How many controls to propose per section. A policy section genuinely satisfies
 # a handful of controls; proposing twenty would bury the real ones and make the
@@ -93,12 +105,24 @@ def propose(conn: sqlite3.Connection) -> int:
                 continue
             rows.append((controls[ci]["id"], section["id"], score, "embedding", None))
 
+    # Clear previous machine proposals first. INSERT OR REPLACE alone leaves
+    # stale edges behind, so raising the threshold produced fewer proposals and
+    # changed nothing about coverage -- the old, lower-confidence edges were
+    # still there and the gap report still counted them.
+    #
+    # Human-confirmed edges are never deleted. Someone accepted those, and a
+    # re-run of a machine step must not silently discard a person's decision.
+    removed = conn.execute(
+        "DELETE FROM satisfies WHERE method = 'embedding' AND confirmed_by IS NULL"
+    ).rowcount
     conn.executemany(
         "INSERT OR REPLACE INTO satisfies "
         "(control_id, section_id, confidence, method, confirmed_by) VALUES (?, ?, ?, ?, ?)",
         rows,
     )
     conn.commit()
+    if removed:
+        console.print(f"cleared {removed} previous unconfirmed proposal(s)")
     console.print(f"proposed {len(rows)} edges, cost ${cost:.4f}")
     return len(rows)
 

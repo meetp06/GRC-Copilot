@@ -6,6 +6,7 @@ import json
 
 import pytest
 
+
 from src.ontology.crosswalk import SOC2_MAPPINGS
 from src.ontology.crosswalk import load as load_crosswalk
 from src.ontology.store import (
@@ -180,3 +181,69 @@ def test_an_answer_with_no_citations_maps_to_nothing(tmp_path, monkeypatch) -> N
     )
     result = controls_mod.controls_for({"retrieved": [], "citations": []})
     assert result == {"controls": [], "soc2": [], "unconfirmed": 0}
+
+
+# --- the labelled mapping set -----------------------------------------------
+
+
+def test_labelled_set_points_at_real_controls() -> None:
+    """A typo'd control id in the labels would count as a permanent miss and
+    quietly depress recall forever -- the same silent-zero failure the week 2
+    golden set validator exists to prevent."""
+    import yaml
+
+    from src.ontology.evaluate_mapping import LABELLED_SET
+    from src.ontology.store import connect as real_connect
+
+    conn = real_connect()
+    known = {r["id"] for r in conn.execute("SELECT id FROM control")}
+    labels = yaml.safe_load(LABELLED_SET.read_text(encoding="utf-8"))["sections"]
+
+    unknown = [
+        (s["section"], c) for s in labels for c in s["expected"] if c not in known
+    ]
+    assert not unknown, f"labels reference controls not in the catalog: {unknown}"
+
+
+def test_labelled_set_contains_sections_that_satisfy_nothing() -> None:
+    """Without negative examples, precision cannot be measured: a mapper that
+    maps everything to something would score perfectly on positives alone."""
+    import yaml
+
+    from src.ontology.evaluate_mapping import LABELLED_SET
+
+    labels = yaml.safe_load(LABELLED_SET.read_text(encoding="utf-8"))["sections"]
+    empty = [s for s in labels if s["expected"] == []]
+    assert len(empty) >= 3, "need several sections whose correct answer is no control"
+
+
+def test_labels_use_base_controls_only() -> None:
+    """An enhancement id contains a dot. A section satisfying AC-2 says nothing
+    about AC-2(1), so labelling one would make recall unreachable."""
+    import yaml
+
+    from src.ontology.evaluate_mapping import LABELLED_SET
+
+    labels = yaml.safe_load(LABELLED_SET.read_text(encoding="utf-8"))["sections"]
+    with_dots = [c for s in labels for c in s["expected"] if "." in c]
+    assert not with_dots
+
+
+def test_scoring_counts_a_spurious_mapping_against_precision() -> None:
+    """The arithmetic itself, without embeddings: a prediction not in the labels
+    must be a false positive, or the whole measurement is decorative."""
+    from src.ontology.evaluate_mapping import evaluate
+
+    labels = [
+        {"section_id": 1, "section": "A", "expected": ["ac-2"]},
+        {"section_id": 2, "section": "B", "expected": []},
+    ]
+    scores = {
+        1: {"ac-2": 0.9, "pe-3": 0.8},
+        2: {"ac-2": 0.7, "pe-3": 0.1},
+    }
+    result = evaluate(labels, scores, threshold=0.5, top_k=5)
+    assert result["tp"] == 1
+    assert result["fp"] == 2, "pe-3 on A and ac-2 on B are both wrong"
+    assert result["precision"] == pytest.approx(1 / 3)
+    assert result["recall"] == 1.0

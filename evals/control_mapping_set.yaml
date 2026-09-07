@@ -1,0 +1,139 @@
+# Golden set for control mapping: which NIST controls does each policy section satisfy?
+#
+# ADR-0013 recorded that the mapping quality claim rested on eyeballing the top
+# proposals, and that this file was the gap. MISTAKES entry 17 is the same
+# lesson: a technique measured against a set that cannot see it has not been
+# evaluated.
+#
+# HOW THESE LABELS WERE MADE, and the limitation that comes with it
+# -----------------------------------------------------------------
+# Labelled by reading each policy section against the NIST SP 800-53 Rev 5
+# control statements, WITHOUT looking at the mapper's proposals or scores.
+# Blind to the system under test, but not independent of it: the same author
+# wrote the mapper and these labels. A genuinely independent set would be
+# labelled by someone else, ideally a compliance analyst.
+#
+# What that means for the numbers: precision and recall here are an upper bound
+# and should be quoted with the caveat, not as though a third party produced
+# them. They are still worth far more than eyeballing, because they are fixed
+# before a run and cannot be adjusted after seeing one.
+#
+# Rules applied:
+#   - Base controls only. An enhancement is a stricter variant, and a section
+#     satisfying AC-2 says nothing about AC-2(1).
+#   - Only controls the text genuinely supports. A section that mentions a topic
+#     without stating a practice gets nothing for it.
+#   - `expected: []` is a real answer. A section about document revision rights
+#     satisfies no control, and a mapper that finds one there is wrong.
+#
+# Never edit an entry to make a run look better. Fix it and note the change in
+# MISTAKES.md.
+
+version: 1
+corpus: data/policies_real
+sections:
+
+  - section_id: 5
+    section: "A. Access Control, Identification, and Authentication"
+    expected: [ac-2, ac-3, ac-6, ia-2]
+    why: "States least privilege explicitly, plus granting access appropriately and verifying the identity of users and entities."
+
+  - section_id: 6
+    section: "B. Awareness and Training"
+    expected: [at-2, at-3]
+    why: "Security training to raise awareness (AT-2) covering specific security-related responsibilities and duties (AT-3), required before access."
+
+  - section_id: 7
+    section: "C. Audit and Accountability"
+    expected: [au-2, au-6, au-9]
+    why: "Activity logging (AU-2), to monitor, analyse and investigate (AU-6), with log management access restricted (AU-9)."
+
+  - section_id: 8
+    section: "D. Business Continuity and Disaster Recovery"
+    expected: [cp-2, cp-9]
+    why: "Requires a documented continuity and disaster recovery plan (CP-2) and replication and backup of critical data (CP-9)."
+
+  - section_id: 9
+    section: "E. Incident Response"
+    expected: [ir-4, ir-8]
+    why: "Maintains an incident response plan reviewed annually (IR-8) documenting detection, reporting and resolution (IR-4)."
+
+  - section_id: 10
+    section: "F. Information Protection"
+    expected: [mp-4, mp-6, sc-28]
+    why: "Physical and digital media protected from unauthorised access (MP-4), with encryption (SC-28) and secure disposal (MP-6)."
+
+  - section_id: 11
+    section: "G. Risk Assessment"
+    expected: [ra-3, ra-5]
+    why: "Risk assessment processes (RA-3) including identifying vulnerabilities and implementing safeguards (RA-5)."
+
+  - section_id: 12
+    section: "H. Other Components of Information Security"
+    expected: [cm-2, cm-6, cm-8, ma-2]
+    why: "Names configuration management with asset inventories (CM-8), security configuration settings (CM-6, CM-2), and system maintenance controls (MA-2)."
+
+  - section_id: 14
+    section: "V. Noncompliance"
+    expected: [ps-8]
+    why: "Sanctions for noncompliance under the staff and student handbooks. Removal of access is a consequence here, not an account management practice."
+
+  - section_id: 15
+    section: "VI. Governance or Responsibilities"
+    expected: [pm-1, pm-2]
+    why: "A CISO who administers and enforces control activities (PM-2) within a documented security programme (PM-1)."
+
+  - section_id: 21
+    section: "A. Threat Assessment"
+    expected: [ra-3]
+    why: "A probabilistic risk analysis of threats and vulnerabilities scored on likelihood. That is RA-3 and nothing narrower."
+
+  - section_id: 25
+    section: "1. Control Implementation"
+    expected: [ca-2]
+    why: "Assesses whether controls are implemented, using a maturity model. Assessment of controls is CA-2."
+
+  - section_id: 32
+    section: "Roles and Responsibilities"
+    expected: [pl-4, ps-7]
+    why: "Responsibilities for all personnel (PL-4) explicitly extended to vendors, contractors and third parties (PS-7)."
+
+  - section_id: 35
+    section: "Policy"
+    expected: [pl-4, at-2]
+    why: "Acceptable usage guidelines covering computer, email, internet and social media use (PL-4), delivered as part of security awareness training (AT-2)."
+
+  - section_id: 40
+    section: "Violation of Policy"
+    expected: [ps-8]
+    why: "Escalating sanctions through HR for policy violations."
+
+  # --- sections that satisfy nothing ---------------------------------------
+  # A mapper that proposes controls here is wrong, and these are the only
+  # entries that can show it. A set of only positive examples measures recall
+  # and is blind to a mapper that maps everything to something.
+
+  - section_id: 16
+    section: "VII. Contact Information"
+    expected: []
+    why: "Who to contact about the policy. No control is about a contact address."
+
+  - section_id: 41
+    section: "Disclosure"
+    expected: []
+    why: "Reserves the right to change the document and give notice. That is document administration, not a security control."
+
+  - section_id: 4
+    section: "IV. Policy"
+    expected: []
+    why: "One sentence saying the following sections describe the framework. A pointer, with no practice in it."
+
+  - section_id: 31
+    section: "Scope"
+    expected: []
+    why: >
+      Enumerates which systems the policy covers. Deliberately labelled empty
+      and worth flagging as arguable: it lists network devices and servers,
+      which is close to CM-8 system component inventory, but the section defines
+      applicability rather than requiring an inventory be maintained. If the
+      mapper proposes CM-8 here, the label is more likely wrong than the mapper.

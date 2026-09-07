@@ -41,7 +41,7 @@ makes this an ontology rather than two lists.
 - **Why it's attractive:** zero infrastructure, and eight controls covered every question in
   the week 2 golden set.
 - **Why I did not pick it here:** the eight were chosen to match the corpus I wrote. Against
-  real documents, 50 controls have policy behind them and 274 do not, and neither number is
+  real documents, 13 controls have policy behind them and 311 do not, and neither number is
   expressible in a dictionary.
 - **When it would be the better call:** a demo that only ever looks up a control by id.
 
@@ -85,11 +85,10 @@ in this product means manufacturing a false attestation.
 ## Consequences
 
 **Good:** gap analysis is one query and it is the thing a customer pays for. Against three
-real university policies: **274 of 324 base controls have no policy section**, worst in System
-and Communications Protection (48 missing) and Program Management (27). The SOC 2 crosswalk
-turns that into a readiness report — 15 of 37 criteria have no policy behind any mapped
-control — and it means one answer serves two frameworks instead of being found again per
-framework.
+real university policies: **311 of 324 base controls have no policy section**. The SOC 2
+crosswalk turns that into a readiness report — 24 of 37 criteria have no policy behind any
+mapped control — and it means one answer serves two frameworks instead of being found again
+per framework.
 
 **Bad:** the crosswalk is hand-built. AICPA's official 800-53 mapping is not freely
 redistributable, so this is roughly 40 criteria mapped by reading control statements on both
@@ -101,17 +100,46 @@ The ontology is also a second store alongside the vector index, holding the same
 in a different shape. They can drift. `policy_section` is loaded from the same parsed markdown
 the index is built from, but nothing yet enforces that they were built from the same run.
 
-**Untested at scale:** 41 policy sections and 324 controls. The mapping quality claim rests on
-eyeballing the top proposals — `AU-02 Event Logging ← C. Audit and Accountability` at 0.523,
-`IR-08 Incident Response Plan ← E. Incident Response` at 0.720 — not on a labelled set. There
-is no golden set for control mapping, which is exactly the gap that MISTAKES entry 17 warns
-about, and it should be built before the mapping threshold is tuned any further.
+**Amendment, 2026-09-07: the mapping was measured, and it was bad.**
+
+The paragraph that stood here said the quality claim rested on eyeballing the top proposals,
+and that a labelled set should exist before the threshold was tuned further. That set now
+exists (`evals/control_mapping_set.yaml`, 19 sections labelled blind to the mapper's output,
+including 4 that satisfy no control). Scored against it, the shipped configuration was:
+
+| threshold | precision | recall | F1 | false positives |
+|---|---|---|---|---|
+| **0.40 (shipped)** | **24%** | 38% | 0.30 | 37 |
+| 0.45 | 42% | 31% | 0.36 | 14 |
+| **0.50 (now)** | **78%** | 22% | 0.34 | 2 |
+| 0.55 | 75% | 9% | 0.17 | 1 |
+
+Three of every four mappings were wrong. Eyeballing the highest-scoring proposals showed me
+the good ones and hid the rest, which is exactly what eyeballing does.
+
+0.50 despite 0.45 having a marginally better F1, because F1 weights the two errors equally and
+this product does not. A missed mapping appears in the gap report as a control with no policy,
+which is conservative and gets fixed. A wrong mapping appears as coverage that does not exist,
+and nobody looks at it again.
+
+**The gap numbers in the original version of this ADR were wrong** — 274 of 324 controls
+without policy, and 15 of 37 SOC 2 criteria. Those counted the bad edges as coverage. The
+honest figures are **311 of 324** and **24 of 37**.
+
+Fixing the threshold also exposed a second bug: `propose()` used `INSERT OR REPLACE` and never
+deleted superseded proposals, so raising the threshold produced 14 edges while 80 stale ones
+from the old run stayed in the table and kept counting. It now clears unconfirmed machine
+proposals before inserting, and never deletes a human-confirmed edge.
+
+**The limitation that remains:** the labels were written by the same author as the mapper,
+blind to its output but not independent of it. Precision here is an upper bound, and should be
+quoted with that caveat. A compliance analyst labelling the same sections is the next step.
 
 ## The interview answer
 
 "Most people build a dictionary and call it an ontology. Mine has edges: control satisfied_by
 policy section, control crosswalks_to SOC 2 criterion. That's what makes gap analysis one
-query — 274 of 324 NIST controls have no policy behind them, and 15 of 37 SOC 2 criteria have
+query — 311 of 324 NIST controls have no policy behind them, and 24 of 37 SOC 2 criteria have
 nothing at all. It's SQLite, not Neo4j, because every query I need is two joins over 1,196
 nodes. And every machine-proposed mapping lands unconfirmed, because an embedding score isn't
 a reason to tell an auditor a control is satisfied."
