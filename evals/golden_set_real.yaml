@@ -1,0 +1,188 @@
+# Golden set for the REAL corpus: public university policy PDFs, parsed by
+# src/pipeline/parse.py into data/policies_real/.
+#
+# Separate from golden_set.yaml on purpose. That set was written against twelve
+# markdown files I wrote to be answerable, and every expected_chunks entry in it
+# points at a section that does not exist here. A test set that cannot see the
+# corpus under test is not a test -- MISTAKES.md entry 17, second occurrence.
+#
+# This set is smaller (15 questions) and harder in a different way. The corpus
+# is three documents from three universities that do not agree with each other,
+# have no shared vocabulary, and were never written to answer a questionnaire.
+#
+# Bands: 5 easy, 5 medium, 2 hard, 3 unanswerable.
+
+version: 1
+corpus: data/policies_real
+questions:
+
+  # ----------------------------------------------------------------- easy (5)
+  # The policy states the fact in roughly the words the question uses.
+
+  - id: r_001
+    question: "Do you apply the principle of least privilege to information access?"
+    difficulty: easy
+    category: access_control
+    expected_chunks:
+      - source: AO 48 Information Security Policy.md
+        section: "A. Access Control, Identification, and Authentication"
+    expected_control: AC-6
+    ground_truth_answer: "Yes. Access to Information and Information Resources is provided according to the principle of least privilege — the most restrictive set of privileges needed to perform authorized tasks."
+
+  - id: r_002
+    question: "Is security awareness training required before staff get system access?"
+    difficulty: easy
+    category: hr_security
+    expected_chunks:
+      - source: AO 48 Information Security Policy.md
+        section: "B. Awareness and Training"
+    expected_control: null
+    ground_truth_answer: "Yes. Security training is provided to raise awareness of security risks and responsibilities, and must be completed in order to access university systems."
+
+  - id: r_003
+    question: "Do you maintain a documented incident response plan, and how often is it reviewed?"
+    difficulty: easy
+    category: incident_response
+    expected_chunks:
+      - source: AO 48 Information Security Policy.md
+        section: "E. Incident Response"
+    expected_control: IR-4
+    ground_truth_answer: "Yes. Pitt Digital maintains an Incident Response Plan covering detection, reporting and resolution of cyber security incidents, developed and reviewed annually."
+
+  - id: r_004
+    question: "What is the scope of your acceptable use policy?"
+    difficulty: easy
+    category: policy_scope
+    expected_chunks:
+      - source: office-of-technology-services-policies-and-procedures-acceptable-use.md
+        section: "Scope"
+    expected_control: null
+    ground_truth_answer: "All information systems owned, operated, maintained and controlled by ASU, and all other internal and external information systems that interact with them."
+
+  - id: r_005
+    question: "What happens if someone violates the policy?"
+    difficulty: easy
+    category: policy_enforcement
+    expected_chunks:
+      - source: office-of-technology-services-policies-and-procedures-acceptable-use.md
+        section: "Violation of Policy"
+    expected_control: null
+    ground_truth_answer: "A violation is treated as a security breach, and sanctions escalate with severity — a first minor breach results in a verbal reprimand by the policy owner."
+
+  # --------------------------------------------------------------- medium (5)
+  # Paraphrased. The question shares little or no vocabulary with the passage,
+  # which is the band that justified embeddings in week 2.
+
+  - id: r_006
+    question: "If a staff member ignores the rules, what are the consequences?"
+    difficulty: medium
+    category: policy_enforcement
+    expected_chunks:
+      - source: AO 48 Information Security Policy.md
+        section: "V. Noncompliance"
+    expected_control: null
+    ground_truth_answer: "Noncompliance may lead to removal of access privileges or termination of services, or sanctions under the Faculty or Staff Handbooks or the Student Code of Conduct."
+
+  - id: r_007
+    question: "Who is responsible for deciding how much risk the organisation carries?"
+    difficulty: medium
+    category: risk_management
+    expected_chunks:
+      - source: AO 48 Information Security Policy.md
+        section: "G. Risk Assessment"
+    expected_control: null
+    ground_truth_answer: "The Office of Risk Management maintains the risk assessment processes, in consultation with Pitt Digital, the Office of Compliance, Investigations and Ethics, and Internal Audit."
+
+  - id: r_008
+    question: "Are outside contractors bound by the same rules as employees?"
+    difficulty: medium
+    category: hr_security
+    expected_chunks:
+      - source: office-of-technology-services-policies-and-procedures-acceptable-use.md
+        section: "Roles and Responsibilities"
+    expected_control: null
+    ground_truth_answer: "Yes. Adhering to the policies is a collaborative effort requiring commitment from all personnel including management, students and users, along with vendors, contractors and other relevant third parties."
+
+  - id: r_009
+    question: "What words does the policy define, and where are those definitions?"
+    difficulty: medium
+    category: definitions
+    expected_chunks:
+      - source: AO 48 Information Security Policy.md
+        section: "III. Definitions"
+    expected_control: null
+    ground_truth_answer: "The Definitions section defines Information, Information Resources, Protected Information, and Unit."
+
+  - id: r_010
+    question: "Who do I contact about this policy?"
+    difficulty: medium
+    category: governance
+    expected_chunks:
+      - source: AO 48 Information Security Policy.md
+        section: "VII. Contact Information"
+    expected_control: null
+    ground_truth_answer: "The policy names a contact point for questions about the policy."
+
+  # ----------------------------------------------------------------- hard (2)
+  # Needs passages from two documents that were written by different
+  # universities and share no vocabulary. This is the band the real corpus makes
+  # genuinely harder than the hand-written one.
+
+  - id: r_011
+    question: "Across all your policies, what are the consequences of a security policy violation?"
+    difficulty: hard
+    category: policy_enforcement
+    expected_chunks:
+      - source: AO 48 Information Security Policy.md
+        section: "V. Noncompliance"
+      - source: office-of-technology-services-policies-and-procedures-acceptable-use.md
+        section: "Violation of Policy"
+    expected_control: null
+    ground_truth_answer: "One policy treats noncompliance as grounds for removal of access or termination of services, or handbook sanctions. The other treats a violation as a security breach with escalating sanctions starting at a verbal reprimand for a first minor breach."
+
+  - id: r_012
+    question: "Who is accountable for information security, and who has to follow the rules?"
+    difficulty: hard
+    category: governance
+    expected_chunks:
+      - source: AO 48 Information Security Policy.md
+        section: "VI. Governance or Responsibilities"
+      - source: office-of-technology-services-policies-and-procedures-acceptable-use.md
+        section: "Roles and Responsibilities"
+    expected_control: null
+    ground_truth_answer: "Accountability sits with named university offices, and the obligation to comply extends to all personnel including management, students, users, vendors, contractors and third parties."
+
+  # --------------------------------------------------------- unanswerable (3)
+  # These universities publish policy, not the operational detail a buyer asks
+  # for. That gap is the realistic version of unanswerable: the document is
+  # about the topic and simply never states the number.
+
+  - id: r_013
+    question: "How quickly do you remediate critical vulnerabilities — 7 days, 30 days?"
+    difficulty: unanswerable
+    category: vulnerability_management
+    expected_chunks: []
+    expected_control: null
+    ground_truth_answer: null
+    distractor: true
+    why_unanswerable: "AO 48 has a Risk Assessment section and mentions managing risks to Information Resources, so retrieval returns plausible adjacent text. No document states a remediation timeline."
+
+  - id: r_014
+    question: "What encryption algorithm do you use for data at rest?"
+    difficulty: unanswerable
+    category: encryption
+    expected_chunks: []
+    expected_control: null
+    ground_truth_answer: null
+    distractor: true
+    why_unanswerable: "F. Information Protection is about protecting information and will retrieve strongly. No document names an algorithm — this is the gap between a policy and the standard beneath it."
+
+  - id: r_015
+    question: "Are you SOC 2 Type II certified?"
+    difficulty: unanswerable
+    category: certifications
+    expected_chunks: []
+    expected_control: null
+    ground_truth_answer: null
+    distractor: false
+    why_unanswerable: "SOC 2 appears nowhere in the corpus. The control case for the two distractor questions above."

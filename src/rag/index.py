@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-from src.rag.chunking import chunk_corpus
+from src.rag.chunking import chunk_corpus, load_corpus
 from src.rag.embeddings import embed_query, embed_texts
 
 INDEX_DIR = Path(__file__).resolve().parents[2] / "data" / "index"
@@ -80,8 +80,16 @@ class VectorIndex:
         return cls(np.load(vectors_path), chunks)
 
 
-def build(strategy: str = DEFAULT_STRATEGY) -> VectorIndex:
-    chunks = chunk_corpus(strategy)
+def build(
+    strategy: str = DEFAULT_STRATEGY,
+    corpus_dir: Path | None = None,
+    name: str | None = None,
+) -> VectorIndex:
+    """Embed a corpus and save it. `name` keys the index files, so the same
+    chunking strategy over a different corpus does not overwrite the first."""
+    corpus = load_corpus(corpus_dir) if corpus_dir else None
+    chunks = chunk_corpus(strategy, corpus)
+    name = name or strategy
     result = embed_texts([c.text for c in chunks])
 
     print(f"strategy      {strategy}")
@@ -101,18 +109,23 @@ def build(strategy: str = DEFAULT_STRATEGY) -> VectorIndex:
             for c in chunks
         ],
     )
-    index.save(strategy)
-    print(f"saved         {INDEX_DIR}/{strategy}.npy")
+    index.save(name)
+    print(f"saved         {INDEX_DIR}/{name}.npy")
     return index
 
 
 def main() -> None:
+    from dotenv import load_dotenv
+
+    load_dotenv()
     if len(sys.argv) < 2 or sys.argv[1] not in {"build", "search"}:
         print(__doc__)
         raise SystemExit(1)
 
     if sys.argv[1] == "build":
-        build(sys.argv[2] if len(sys.argv) > 2 else DEFAULT_STRATEGY)
+        corpus_dir = Path(sys.argv[2]) if len(sys.argv) > 2 else None
+        name = sys.argv[3] if len(sys.argv) > 3 else DEFAULT_STRATEGY
+        build(DEFAULT_STRATEGY, corpus_dir, name)
         return
 
     query = " ".join(sys.argv[2:])

@@ -15,3 +15,7 @@ data/index/
 # checkpoint database: run state, rebuildable, may contain customer text
 data/runs.sqlite
 data/*.sqlite
+
+# parsed output and source PDFs: derived / third-party, rebuildable
+data/policies_real/
+pdf_data/
