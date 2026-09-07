@@ -133,3 +133,50 @@ def test_walk_controls_returns_parents_before_children() -> None:
     controls = walk_controls(MINI_CATALOG["catalog"]["groups"][0]["controls"], "ac")
     ids = [c.id for c in controls]
     assert ids.index("ac-2") < ids.index("ac-2.1")
+
+
+# --- answer -> controls -> frameworks ---------------------------------------
+
+
+def test_only_cited_sections_reach_the_control_mapping(tmp_path, monkeypatch) -> None:
+    """A control reached through a passage the drafter retrieved but did not use
+    is not evidenced by this answer. Counting it would inflate coverage with
+    controls no citation supports."""
+    import src.graph.controls as controls_mod
+
+    conn = connect(tmp_path / "o.sqlite")
+    cat = tmp_path / "c.json"
+    cat.write_text(json.dumps(MINI_CATALOG), encoding="utf-8")
+    load_catalog(conn, cat)
+    conn.execute(
+        "INSERT INTO policy_section (id, source, section, text) VALUES (1,'a.md','Cited','x')"
+    )
+    conn.execute(
+        "INSERT INTO policy_section (id, source, section, text) VALUES (2,'a.md','Ignored','y')"
+    )
+    conn.executemany(
+        "INSERT INTO satisfies (control_id, section_id, confidence, method) VALUES (?,?,?,?)",
+        [("ac-2", 1, 0.6, "embedding"), ("ac-2.1", 2, 0.9, "embedding")],
+    )
+    conn.commit()
+    monkeypatch.setattr(controls_mod, "connect", lambda *a, **k: conn)
+
+    state = {
+        "retrieved": [
+            {"source": "a.md", "section": "Cited", "text": "x", "score": 0.5},
+            {"source": "a.md", "section": "Ignored", "text": "y", "score": 0.4},
+        ],
+        "citations": [1],
+    }
+    result = controls_mod.controls_for(state)
+    assert [c["label"] for c in result["controls"]] == ["AC-2"]
+
+
+def test_an_answer_with_no_citations_maps_to_nothing(tmp_path, monkeypatch) -> None:
+    import src.graph.controls as controls_mod
+
+    monkeypatch.setattr(
+        controls_mod, "connect", lambda *a, **k: connect(tmp_path / "o.sqlite")
+    )
+    result = controls_mod.controls_for({"retrieved": [], "citations": []})
+    assert result == {"controls": [], "soc2": [], "unconfirmed": 0}
