@@ -1,0 +1,122 @@
+# Every pull request, and every push to main.
+#
+#   lint ──▶ tests ──▶ security scan ──▶ eval gate
+#
+# The eval gate is the one worth explaining. Lint and tests catch code that is
+# broken. Neither notices when a prompt change quietly drops answer quality by
+# ten points, because nothing throws -- the system keeps answering, just worse.
+# So the gate re-runs the golden set and fails the build on a regression.
+#
+# It is opt-in per run (workflow_dispatch or a label), because it costs about a
+# cent and needs AWS credentials. A gate that runs on every PR from a fork would
+# hand Bedrock access to anyone who opens one.
+
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      run_eval:
+        description: "Run the golden-set eval gate (costs ~$0.01, needs AWS)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  # A new push supersedes an in-flight run for the same branch. Without this,
+  # three pushes in a minute run three full pipelines and the first one's result
+  # is already meaningless by the time it lands.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      # Pinned to the same version as .pre-commit-config.yaml. MISTAKES entry 12:
+      # two ruff versions disagreeing meant every commit reformatted the last
+      # commit's work.
+      - run: pip install ruff==0.6.9
+      - run: ruff check src tests
+      - run: ruff format --check src tests
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+      # No AWS credentials in this job, deliberately. Every test is offline, and
+      # a suite that silently starts calling Bedrock would cost money per run and
+      # fail for anyone without an account.
+      - run: pytest -q
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # gitleaks needs history to scan past commits, not just the tip.
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Committed secrets
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Python security issues
+        run: |
+          pip install bandit
+          # Not -ll: this is a compliance product, and a medium-severity finding
+          # here is worth reading rather than filtering out.
+          bandit -r src -f screen
+
+      - name: Known CVEs in dependencies
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements.txt --strict
+
+  eval-gate:
+    # Only on explicit request. Costs money and needs credentials, so it must
+    # never run automatically on a pull request from a fork.
+    if: github.event_name == 'workflow_dispatch' && inputs.run_eval
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    permissions:
+      id-token: write   # for OIDC; no long-lived keys in secrets
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      # OIDC rather than an access key pair in GitHub secrets. A long-lived key
+      # in CI is one of the most common ways an account gets breached, and it
+      # cannot be rotated by anyone who does not own the repo.
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_CI_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - run: python -m src.rag.index build
+      - run: python -m src.rag.evaluate_retrieval
+      - name: Fail the build if retrieval regressed
+        run: python scripts/eval_gate.py

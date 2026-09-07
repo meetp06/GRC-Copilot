@@ -32,6 +32,9 @@ def controls_for(state: QuestionState) -> dict:
 
     conn = connect()
     pairs = [(c["source"], c["section"]) for c in cited]
+    # Only "?" markers, one pair per cited section. The values are bound, never
+    # interpolated -- SQLite has no syntax for a variable-length parameter list,
+    # so the marker count has to be built into the string. (nosec B608 below.)
     placeholders = ",".join("(?,?)" for _ in pairs)
     flat = [v for pair in pairs for v in pair]
 
@@ -43,7 +46,7 @@ def controls_for(state: QuestionState) -> dict:
         JOIN control c ON c.id = s.control_id
         WHERE (p.source, p.section) IN (VALUES {placeholders})
         ORDER BY s.confidence DESC
-        """,
+        """,  # nosec B608
         flat,
     ).fetchall()
 
@@ -59,7 +62,7 @@ def controls_for(state: QuestionState) -> dict:
                 JOIN crosswalk x ON x.control_id = s.control_id
                 WHERE (p.source, p.section) IN (VALUES {placeholders})
                 ORDER BY x.criterion
-                """,
+                """,  # nosec B608
                 flat,
             ).fetchall()
         ]

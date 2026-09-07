@@ -9,7 +9,14 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from src.api import jobs
-from src.api.main import MAX_UPLOAD_BYTES, app, read_questionnaire_csv
+from src.api.main import (
+    MAX_QUESTIONS,
+    MAX_UPLOAD_BYTES,
+    app,
+    read_questionnaire_csv,
+    require_api_key,
+    thread_id,
+)
 
 
 @pytest.fixture
@@ -121,15 +128,95 @@ def test_approving_a_question_not_awaiting_review_is_409(client) -> None:
         snapshot = build.return_value.get_state.return_value
         snapshot.values = {"question": "Do you encrypt?", "status": "approved"}
         snapshot.next = ()
-        response = client.post("/reviews/q1/approve", json={})
+        response = client.post("/reviews/job1/q1/approve", json={})
     assert response.status_code == 409
 
 
 def test_approving_an_unknown_question_is_404(client) -> None:
     with patch("src.api.main.build_graph") as build:
         build.return_value.get_state.return_value.values = {}
-        response = client.post("/reviews/nope/approve", json={})
+        response = client.post("/reviews/job1/nope/approve", json={})
     assert response.status_code == 404
+
+
+# --- tenant isolation -------------------------------------------------------
+
+
+def test_two_jobs_with_the_same_question_id_do_not_share_a_checkpoint() -> None:
+    """The question id comes from a customer's CSV, and "q1" is what everyone
+    writes. Using it directly as the checkpoint thread id meant the second
+    customer to upload a q1 read and overwrote the first customer's answer.
+
+    Found by a security review after this was pushed, not by a test."""
+    assert thread_id("jobA", "q1") != thread_id("jobB", "q1")
+    assert thread_id("jobA", "q1").startswith("jobA")
+
+
+def test_a_review_decision_names_the_job_not_just_the_question(client) -> None:
+    """Approving "q1" with no job would approve whichever tenant happened to own
+    that checkpoint. The old route must be gone, not merely superseded."""
+    assert client.post("/reviews/q1/approve", json={}).status_code == 404
+
+
+# --- authentication and limits ----------------------------------------------
+
+
+def test_no_key_configured_means_open_for_local_use(monkeypatch) -> None:
+    """The test suite and local development must work without a key. The startup
+    mode is explicit rather than accidental."""
+    monkeypatch.delenv("GRC_API_KEY", raising=False)
+    require_api_key(None)  # must not raise
+
+
+def test_a_configured_key_is_required(monkeypatch) -> None:
+    monkeypatch.setenv("GRC_API_KEY", "secret")
+    with pytest.raises(HTTPException) as err:
+        require_api_key(None)
+    assert err.value.status_code == 401
+    with pytest.raises(HTTPException):
+        require_api_key("wrong")
+    require_api_key("secret")  # must not raise
+
+
+def test_every_data_route_requires_the_key_and_health_does_not(
+    client, monkeypatch
+) -> None:
+    """Tested by calling the API rather than by inspecting its route table.
+
+    An earlier version of this asserted over app.routes, which does not list
+    routes added by include_router in this FastAPI version -- so it passed while
+    testing nothing. Behaviour is the thing that matters anyway: a load balancer
+    must be able to call /health without a credential, and nothing else may be
+    reachable without one.
+    """
+    monkeypatch.setenv("GRC_API_KEY", "secret")
+
+    assert client.get("/health").status_code != 401, "health must not need a key"
+
+    for method, path in [
+        ("get", "/questionnaires"),
+        ("get", "/reviews"),
+        ("get", "/gaps"),
+        ("get", "/controls/AC-02"),
+    ]:
+        assert getattr(client, method)(path).status_code == 401, path
+
+    # ...and the same call succeeds once the key is supplied.
+    assert (
+        client.get("/questionnaires", headers={"X-API-Key": "secret"}).status_code
+        == 200
+    )
+
+
+def test_a_huge_questionnaire_is_refused_on_row_count() -> None:
+    """2MB of CSV is tens of thousands of questions, each of which costs a
+    Bedrock call. A byte cap bounds the upload but not the spend."""
+    body = "id,question\n" + "".join(
+        f"q{i},Do you encrypt?\n" for i in range(MAX_QUESTIONS + 1)
+    )
+    with pytest.raises(HTTPException) as err:
+        read_questionnaire_csv(body.encode(), "big.csv")
+    assert err.value.status_code == 413
 
 
 # --- telemetry --------------------------------------------------------------

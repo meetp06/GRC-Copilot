@@ -158,6 +158,8 @@ def gaps(conn: sqlite3.Connection, confirmed_only: bool = False) -> None:
     is the honest version: an unconfirmed machine proposal is not coverage, so
     the gap list under that flag is always longer and always the real one.
     """
+    # One of exactly two literals, chosen by a bool. Nothing user-supplied
+    # reaches the query text. (nosec B608 on the execute below.)
     clause = "AND s.confirmed_by IS NOT NULL" if confirmed_only else ""
     rows = conn.execute(
         f"""
@@ -169,7 +171,7 @@ def gaps(conn: sqlite3.Connection, confirmed_only: bool = False) -> None:
               SELECT 1 FROM satisfies s WHERE s.control_id = c.id {clause}
           )
         GROUP BY f.title ORDER BY missing DESC
-        """
+        """  # nosec B608
     ).fetchall()
     total_missing = sum(r["missing"] for r in rows)
     total = conn.execute(

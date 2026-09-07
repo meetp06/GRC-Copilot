@@ -111,8 +111,12 @@ def mark(conn: sqlite3.Connection, job_id: str, **fields) -> None:
     if not updates:
         return
     assignments = ", ".join(f"{k} = ?" for k in updates)
+    # nosec B608 - `assignments` is built only from keys that survived the
+    # `allowed` filter above, so no caller-supplied string reaches the SQL. Every
+    # value is a bound parameter. test_mark_ignores_unknown_columns pins this.
     conn.execute(
-        f"UPDATE job SET {assignments} WHERE id = ?", [*updates.values(), job_id]
+        f"UPDATE job SET {assignments} WHERE id = ?",  # nosec B608
+        [*updates.values(), job_id],
     )
     conn.commit()
 

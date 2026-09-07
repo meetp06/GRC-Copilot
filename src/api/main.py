@@ -7,8 +7,8 @@
     GET  /questionnaires/{id}            status and progress
     GET  /questionnaires/{id}/answers    answers, citations, controls
     GET  /reviews                        what is waiting for a human
-    POST /reviews/{qid}/approve          approve, optionally with an edit
-    POST /reviews/{qid}/reject           reject
+    POST /reviews/{job}/{qid}/approve    approve, optionally with an edit
+    POST /reviews/{job}/{qid}/reject     reject
     GET  /controls/{label}               one control and what satisfies it
     GET  /gaps                           controls with no policy behind them
     GET  /health
@@ -41,7 +41,19 @@ import io
 import threading
 from typing import Annotated
 
-from fastapi import Body, FastAPI, File, HTTPException, UploadFile
+import hmac
+import os
+
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    FastAPI,
+    File,
+    Header,
+    HTTPException,
+    UploadFile,
+)
 from pydantic import BaseModel, Field
 
 from src.api import jobs, telemetry
@@ -51,17 +63,74 @@ from src.graph.controls import controls_for
 from src.ontology.store import connect as ontology_connect
 from src.rag.index import VectorIndex
 
+# --------------------------------------------------------------------------
+# authentication
+
+
+def require_api_key(x_api_key: Annotated[str | None, Header()] = None) -> None:
+    """Reject a request without the shared key.
+
+    A shared key is the weakest thing that is not nothing. It gives no identity,
+    no per-tenant authorisation, and no revocation short of rotating it for
+    everyone -- so it does not make this multi-tenant, and the threat model says
+    so (T6). What it does is stop the API being usable by anyone who can reach
+    the port, which was the state a security review found it in.
+
+    GRC_API_KEY unset means unauthenticated, and that is deliberate: local
+    development and the test suite would otherwise need a key to do anything.
+    The startup banner says which mode it is in, because an API that is silently
+    open is the failure being fixed here.
+
+    hmac.compare_digest rather than ==, so the comparison does not leak the key
+    one character at a time through response timing.
+    """
+    expected = os.environ.get("GRC_API_KEY")
+    if not expected:
+        return
+    if not x_api_key or not hmac.compare_digest(x_api_key, expected):
+        raise HTTPException(401, "missing or invalid X-API-Key")
+
+
 app = FastAPI(
     title="GRC Copilot",
-    version="0.5.0",
+    version="0.6.0",
     description="Answers security questionnaires from your own policy corpus, with citations.",
 )
+
+# Everything that touches data hangs off this router, so a new endpoint is
+# protected by adding it here rather than by remembering a decorator.
+#
+# A router rather than an app-level dependency: FastAPI applies app-level
+# dependencies to every route including /health, and `dependencies=[]` on a
+# route does not opt out of them. A health check that needs a credential cannot
+# be called by a load balancer, which makes it useless as a health check.
+api = APIRouter(dependencies=[Depends(require_api_key)])
 
 # A questionnaire is a few hundred rows of text. Anything larger is a mistake or
 # an attack, and refusing it before reading is cheaper than either.
 MAX_UPLOAD_BYTES = 2 * 1024 * 1024
 
+# A row count cap as well as a byte cap. 2MB of CSV is tens of thousands of
+# questions, each of which costs a Bedrock call -- so the byte limit alone
+# bounds the upload but not the spend.
+MAX_QUESTIONS = 500
+
 INDEX_NAME = "real"
+
+
+def thread_id(job_id: str, question_id: str) -> str:
+    """Checkpoint thread id for one question of one job.
+
+    Namespaced by job, and this is a security boundary rather than tidiness.
+    The question id comes from a customer's CSV, and "q1" is the most likely
+    id anyone writes. Using it directly as the thread id means two customers
+    who both upload a q1 share a checkpoint: the second run reads and
+    overwrites the first's answers, across tenants.
+
+    Found by a security review after the API was pushed, not by a test.
+    """
+    return f"{job_id}:{question_id}"
+
 
 _index: VectorIndex | None = None
 _lock = threading.Lock()
@@ -106,6 +175,7 @@ class JobStatus(BaseModel):
 
 class Answer(BaseModel):
     question_id: str
+    job_id: str | None = None
     question: str
     status: str
     answerable: bool | None = None
@@ -154,6 +224,11 @@ def read_questionnaire_csv(raw: bytes, filename: str) -> list[dict]:
     if missing:
         raise HTTPException(
             400, f"rows missing an id or question column: {missing[:5]}"
+        )
+
+    if len(rows) > MAX_QUESTIONS:
+        raise HTTPException(
+            413, f"{len(rows)} questions; the limit is {MAX_QUESTIONS} per upload"
         )
 
     ids = [r["id"].strip() for r in rows]
@@ -214,16 +289,21 @@ def run_job(job_id: str, rows: list[dict]) -> None:
     jobs.finish(conn, job_id, "done" if failed < len(rows) else "failed")
 
 
-def answer_for(graph, question_id: str, question: str) -> Answer:
-    snapshot = graph.get_state(thread_config(question_id))
+def answer_for(
+    graph, thread: str, question_id: str, question: str, job_id: str | None = None
+) -> Answer:
+    snapshot = graph.get_state(thread_config(thread))
     values = snapshot.values or {}
     if not values:
-        return Answer(question_id=question_id, question=question, status="not_run")
+        return Answer(
+            question_id=question_id, job_id=job_id, question=question, status="not_run"
+        )
 
     retrieved = values.get("retrieved", [])
     mapped = controls_for(values)
     return Answer(
         question_id=question_id,
+        job_id=job_id,
         question=question,
         status="needs_review" if snapshot.next else values.get("status", "unknown"),
         answerable=values.get("answerable"),
@@ -258,7 +338,7 @@ def health() -> dict:
         ) from None
 
 
-@app.post("/questionnaires", status_code=202, response_model=JobAccepted)
+@api.post("/questionnaires", status_code=202, response_model=JobAccepted)
 def submit(
     file: Annotated[UploadFile, File(description="CSV with id,question columns")],
 ) -> JobAccepted:
@@ -272,7 +352,7 @@ def submit(
     )
 
 
-@app.get("/questionnaires", response_model=list[JobStatus])
+@api.get("/questionnaires", response_model=list[JobStatus])
 def list_jobs(limit: int = 20) -> list[JobStatus]:
     return [
         JobStatus(job_id=j.id, progress=round(j.progress, 3), **_job_fields(j))
@@ -294,7 +374,7 @@ def _job_fields(job: jobs.Job) -> dict:
     }
 
 
-@app.get("/questionnaires/{job_id}", response_model=JobStatus)
+@api.get("/questionnaires/{job_id}", response_model=JobStatus)
 def job_status(job_id: str) -> JobStatus:
     job = jobs.get(jobs.connect(), job_id)
     if not job:
@@ -302,7 +382,7 @@ def job_status(job_id: str) -> JobStatus:
     return JobStatus(job_id=job.id, progress=round(job.progress, 3), **_job_fields(job))
 
 
-@app.get("/questionnaires/{job_id}/answers", response_model=list[Answer])
+@api.get("/questionnaires/{job_id}/answers", response_model=list[Answer])
 def job_answers(job_id: str) -> list[Answer]:
     conn = jobs.connect()
     job = jobs.get(conn, job_id)
@@ -322,7 +402,7 @@ def _question_text(graph, question_id: str) -> str:
     )
 
 
-@app.get("/reviews", response_model=list[Answer])
+@api.get("/reviews", response_model=list[Answer])
 def reviews() -> list[Answer]:
     """Everything parked at the human-review interrupt, across all jobs."""
     conn = jobs.connect()
@@ -339,39 +419,53 @@ def reviews() -> list[Answer]:
     return out
 
 
-@app.post("/reviews/{question_id}/approve", response_model=Answer)
+@api.post("/reviews/{job_id}/{question_id}/approve", response_model=Answer)
 def approve(
-    question_id: str, decision: Annotated[ReviewDecision, Body()] = ReviewDecision()
+    job_id: str,
+    question_id: str,
+    decision: Annotated[ReviewDecision, Body()] = ReviewDecision(),
 ) -> Answer:
     action = (
         {"action": "edit", "answer": decision.answer}
         if decision.answer
         else {"action": "approve"}
     )
-    return _decide(question_id, action)
+    return _decide(job_id, question_id, action)
 
 
-@app.post("/reviews/{question_id}/reject", response_model=Answer)
+@api.post("/reviews/{job_id}/{question_id}/reject", response_model=Answer)
 def reject(
-    question_id: str, decision: Annotated[ReviewDecision, Body()] = ReviewDecision()
+    job_id: str,
+    question_id: str,
+    decision: Annotated[ReviewDecision, Body()] = ReviewDecision(),
 ) -> Answer:
-    return _decide(question_id, {"action": "reject", "reason": decision.reason})
+    return _decide(job_id, question_id, {"action": "reject", "reason": decision.reason})
 
 
-def _decide(question_id: str, action: dict) -> Answer:
+def _decide(job_id: str, question_id: str, action: dict) -> Answer:
+    """Approve or reject one question of one job.
+
+    The route carries the job id as well as the question id, because a question
+    id alone does not identify a run. Two customers can both upload a q1, and
+    approving "q1" would otherwise approve whichever of them happened to own
+    that checkpoint.
+    """
+    thread = thread_id(job_id, question_id)
     checkpointer = open_checkpointer()
     graph = build_graph(index(), checkpointer=checkpointer)
-    snapshot = graph.get_state(thread_config(question_id))
+    snapshot = graph.get_state(thread_config(thread))
     if not snapshot.values:
         raise HTTPException(404, "no such question")
     if snapshot.next != ("human_review",):
         raise HTTPException(409, "this question is not awaiting review")
 
-    resume(question_id, action, index(), checkpointer)
-    return answer_for(graph, question_id, snapshot.values.get("question", ""))
+    resume(thread, action, index(), checkpointer)
+    return answer_for(
+        graph, thread, question_id, snapshot.values.get("question", ""), job_id
+    )
 
 
-@app.get("/controls/{label}")
+@api.get("/controls/{label}")
 def control(label: str) -> dict:
     """One control, and which policy sections are claimed to satisfy it."""
     conn = ontology_connect()
@@ -416,7 +510,7 @@ def control(label: str) -> dict:
     }
 
 
-@app.get("/gaps")
+@api.get("/gaps")
 def gaps(confirmed_only: bool = False) -> dict:
     """Controls with no policy section behind them, by family.
 
@@ -424,6 +518,8 @@ def gaps(confirmed_only: bool = False) -> dict:
     is not coverage.
     """
     conn = ontology_connect()
+    # One of exactly two literals, chosen by a bool. Nothing user-supplied
+    # reaches the query text. (nosec B608 on the execute below.)
     clause = "AND s.confirmed_by IS NOT NULL" if confirmed_only else ""
     rows = conn.execute(
         f"""
@@ -432,7 +528,7 @@ def gaps(confirmed_only: bool = False) -> dict:
         WHERE c.parent_id IS NULL
           AND NOT EXISTS (SELECT 1 FROM satisfies s WHERE s.control_id = c.id {clause})
         GROUP BY f.title ORDER BY missing DESC
-        """
+        """  # nosec B608
     ).fetchall()
     total = conn.execute(
         "SELECT COUNT(*) FROM control WHERE parent_id IS NULL"
@@ -444,3 +540,7 @@ def gaps(confirmed_only: bool = False) -> dict:
         "controls_without_policy": missing,
         "by_family": [{"family": r["family"], "missing": r["missing"]} for r in rows],
     }
+
+
+# Registered last so every route above is defined on the protected router first.
+app.include_router(api)
