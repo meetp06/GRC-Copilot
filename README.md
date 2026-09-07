@@ -40,9 +40,9 @@ document, so it survives an auditor.
 | 1 | Raw agent loop, no framework, Bedrock | ✅ Complete |
 | 2 | RAG + golden eval set | ✅ Complete |
 | 3 | LangGraph multi-agent + human-in-the-loop | ✅ Complete |
-| 4 | Data pipeline + control ontology | 🟡 Next |
-| 5 | FastAPI + SDK + MCP + observability | ⚪ Not started |
-| 6 | Terraform + CI/CD + threat model | ⚪ Not started |
+| 4 | Data pipeline + control ontology | ✅ Complete |
+| 5 | FastAPI + SDK + MCP + observability | ✅ Complete |
+| 6 | Terraform + CI/CD + threat model | 🟡 Next |
 
 *Keep this table current. It's the first thing anyone reads.*
 
@@ -169,6 +169,66 @@ Decisions: [ADR-0009 framework choice](docs/adr/0009-langgraph-over-a-hand-writt
 | Measurement | Result |
 |---|---|
 | Total AWS spend, week 3 | ~$0.05 |
+
+### What weeks 4 and 5 built
+
+**Week 4 — real documents.** Five public university and government PDFs in, three usable
+markdown documents out. The two rejections are the point: one had no recoverable structure,
+and one was a 70-page PowerPoint about incident response that would otherwise have been
+indexed and cited to a customer as company policy.
+
+```
+read PDFs → parse → write markdown → build index
+                 ↘ document catalog
+```
+
+Headings come from a cascade — text patterns, then font size and weight, then refusal —
+and which method won is recorded per document. Retrieval on the real corpus: **92% recall**
+against a 15-question golden set written for it, down from 97% on the hand-written one, with
+MRR falling 0.93 → 0.63 because real sections are five times larger.
+
+**The control ontology.** The eight-control dictionary is replaced by NIST SP 800-53 Rev 5.2.0
+loaded from NIST's own OSCAL JSON — 20 families, 324 base controls, 1,196 with enhancements —
+plus a hand-built SOC 2 crosswalk.
+
+| Report | Result |
+|---|---|
+| NIST controls with no policy behind them | **274 of 324** |
+| SOC 2 criteria with no policy at all | **15 of 37** |
+| `"Do you have an incident response plan?"` | → IR-04, IR-08 → CC7.3, CC7.4, CC7.5 |
+
+That last row is the product claim: answer once, and the same answer serves a NIST
+questionnaire and a SOC 2 one. Every machine-proposed mapping stays unconfirmed until a named
+person accepts it — an embedding score is not a basis for telling an auditor a control is
+satisfied.
+
+**Week 5 — three ways in.**
+
+```
+graph ─▶ HTTP API   ─▶ POST /questionnaires → 202 + job_id → poll → answers
+      ↘ Python SDK  ─▶ typed client, polling with backoff, named errors
+      ↘ MCP server  ─▶ ask inside Claude or Cursor, no server needed
+```
+
+A 200-question run takes four minutes, which is longer than a load balancer will hold a
+connection, so `POST` returns **202 Accepted** and the work happens in the background.
+
+Per-question telemetry, from the first run through the API:
+
+| | |
+|---|---|
+| Cost per question | **$0.000305** |
+| Latency median / p95 | 2519 ms / 3289 ms |
+| Uncited answers | **0** |
+
+Decisions: [ADR-0012 Dagster](docs/adr/0012-dagster-for-ingestion.md),
+[ADR-0013 ontology](docs/adr/0013-control-ontology-in-sqlite.md),
+[ADR-0014 async jobs](docs/adr/0014-async-jobs-over-blocking-requests.md),
+[ADR-0015 three interfaces](docs/adr/0015-three-interfaces-one-core.md).
+
+| Measurement | Result |
+|---|---|
+| Total AWS spend, weeks 1-5 | ~$0.07 |
 
 ## Quickstart
 
