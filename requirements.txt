@@ -8,6 +8,8 @@ langgraph-checkpoint-sqlite>=3.1.1   # durable state so a paused run survives a 
 pdfplumber>=0.11.0                   # PDF text + table extraction; tables are a week 4 problem
 dagster>=1.13.0                      # ingestion as assets -- oversized today, see ADR-0012
 dagster-webserver>=1.13.0            # dagster dev UI, local only
+fastapi>=0.115.0                     # HTTP API; starlette/uvicorn/pydantic already present
+python-multipart>=0.0.9              # fastapi needs it to accept a file upload
 
 # dev
 pytest>=8.0.0

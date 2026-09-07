@@ -1,0 +1,132 @@
+"""API tests. No model calls -- the graph is stubbed, so these are free."""
+
+from __future__ import annotations
+
+from unittest.mock import patch
+
+import pytest
+from fastapi import HTTPException
+from fastapi.testclient import TestClient
+
+from src.api import jobs
+from src.api.main import MAX_UPLOAD_BYTES, app, read_questionnaire_csv
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    monkeypatch.setattr(jobs, "DB_PATH", tmp_path / "jobs.sqlite")
+    return TestClient(app)
+
+
+def csv_bytes(text: str) -> bytes:
+    return text.encode("utf-8")
+
+
+# --- upload validation ------------------------------------------------------
+
+
+def test_a_bad_file_is_refused_at_upload_not_mid_run() -> None:
+    """A malformed file must fail with a 400 at submit time. Failing forty
+    questions into a run the client already believes is progressing is worse
+    than failing immediately, and it has already been paid for."""
+    with pytest.raises(HTTPException) as err:
+        read_questionnaire_csv(csv_bytes("id,question\nq1,\n"), "q.csv")
+    assert err.value.status_code == 400
+    assert "missing" in err.value.detail
+
+
+def test_duplicate_question_ids_are_refused() -> None:
+    """Question ids are checkpoint thread ids. Two rows sharing one id would
+    silently overwrite each other's answers."""
+    with pytest.raises(HTTPException) as err:
+        read_questionnaire_csv(csv_bytes("id,question\nq1,A?\nq1,B?\n"), "q.csv")
+    assert err.value.status_code == 400
+    assert "unique" in err.value.detail
+
+
+def test_an_oversized_upload_is_refused_before_parsing() -> None:
+    with pytest.raises(HTTPException) as err:
+        read_questionnaire_csv(b"x" * (MAX_UPLOAD_BYTES + 1), "big.csv")
+    assert err.value.status_code == 413
+
+
+def test_non_utf8_is_refused_with_a_reason() -> None:
+    with pytest.raises(HTTPException) as err:
+        read_questionnaire_csv(b"\xff\xfe\x00bad", "q.csv")
+    assert err.value.status_code == 400
+
+
+def test_a_utf8_bom_is_tolerated() -> None:
+    """Excel writes a BOM. Refusing it would reject the most common way a
+    questionnaire actually arrives."""
+    rows = read_questionnaire_csv("﻿id,question\nq1,Do you encrypt?\n".encode(), "q.csv")
+    assert rows == [{"id": "q1", "question": "Do you encrypt?"}]
+
+
+# --- async job contract -----------------------------------------------------
+
+
+def test_submit_returns_202_immediately_and_does_not_wait(client) -> None:
+    """A 200-question run takes minutes; a blocking request gets killed by a
+    load balancer. 202 says accepted, not done."""
+    with patch("src.api.main.threading.Thread") as thread:
+        response = client.post(
+            "/questionnaires",
+            files={"file": ("q.csv", "id,question\nq1,Do you encrypt?\n", "text/csv")},
+        )
+    assert response.status_code == 202
+    body = response.json()
+    assert body["questions"] == 1
+    assert body["status_url"].endswith(body["job_id"])
+    thread.assert_called_once(), "work must be handed to a background thread"
+
+
+def test_an_unknown_job_is_404_not_an_empty_result(client) -> None:
+    assert client.get("/questionnaires/nope").status_code == 404
+    assert client.get("/questionnaires/nope/answers").status_code == 404
+
+
+def test_progress_is_reported_while_the_job_is_still_running(client, tmp_path) -> None:
+    conn = jobs.connect(tmp_path / "jobs.sqlite")
+    job_id = jobs.create(conn, "q.csv", [f"q{i}" for i in range(4)])
+    jobs.mark(conn, job_id, status="running", completed=1)
+
+    job = jobs.get(conn, job_id)
+    assert job.progress == 0.25
+    assert job.status == "running"
+
+
+def test_a_job_with_no_questions_does_not_divide_by_zero(tmp_path) -> None:
+    conn = jobs.connect(tmp_path / "jobs.sqlite")
+    job_id = jobs.create(conn, "empty.csv", [])
+    assert jobs.get(conn, job_id).progress == 0.0
+
+
+def test_mark_ignores_unknown_columns(tmp_path) -> None:
+    """mark() builds SQL from its keyword names, so it must accept only known
+    columns -- otherwise a caller's typo becomes a SQL fragment."""
+    conn = jobs.connect(tmp_path / "jobs.sqlite")
+    job_id = jobs.create(conn, "q.csv", ["q1"])
+    jobs.mark(conn, job_id, completed=1, injected="; DROP TABLE job")
+    assert jobs.get(conn, job_id).completed == 1
+
+
+# --- review contract --------------------------------------------------------
+
+
+def test_approving_a_question_not_awaiting_review_is_409(client) -> None:
+    """Not 404: the question may well exist. It is a state conflict, and the
+    status code should say which."""
+    with patch("src.api.main.build_graph") as build:
+        snapshot = build.return_value.get_state.return_value
+        snapshot.values = {"question": "Do you encrypt?", "status": "approved"}
+        snapshot.next = ()
+        response = client.post("/reviews/q1/approve", json={})
+    assert response.status_code == 409
+
+
+def test_approving_an_unknown_question_is_404(client) -> None:
+    with patch("src.api.main.build_graph") as build:
+        build.return_value.get_state.return_value.values = {}
+        response = client.post("/reviews/nope/approve", json={})
+    assert response.status_code == 404
