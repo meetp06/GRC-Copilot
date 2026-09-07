@@ -10,6 +10,7 @@ dagster>=1.13.0                      # ingestion as assets -- oversized today, s
 dagster-webserver>=1.13.0            # dagster dev UI, local only
 fastapi>=0.115.0                     # HTTP API; starlette/uvicorn/pydantic already present
 python-multipart>=0.0.9              # fastapi needs it to accept a file upload
+mcp>=2.0.0                           # MCP server: use this from inside Claude or Cursor
 
 # dev
 pytest>=8.0.0
