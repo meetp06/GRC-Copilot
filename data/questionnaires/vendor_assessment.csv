@@ -1,0 +1,18 @@
+id,question
+q_001,Is access to information systems granted on a least-privilege basis?
+q_002,Is user access revoked when an employee is terminated or changes role?
+q_003,What methods are used to verify the identity of users accessing systems?
+q_004,Is security awareness training mandatory before a user is granted access?
+q_005,Do you log system activity for audit purposes?
+q_006,Are audit logs protected from unauthorized modification or deletion?
+q_007,Who is permitted to review activity logging information?
+q_008,Do you maintain a documented incident response plan?
+q_009,How often is the incident response plan reviewed?
+q_010,Are business continuity and disaster recovery plans tested on a schedule?
+q_011,Who owns the risk assessment process for information resources?
+q_012,How are exceptions to security controls approved and how often are they reviewed?
+q_013,What are the consequences of violating the information security policy?
+q_014,What is your recovery point objective and recovery time objective for critical systems?
+q_015,Do you hold a current SOC 2 Type II report?
+q_016,Do you operate a public bug bounty programme?
+q_017,What minimum TLS version is enforced for data in transit?

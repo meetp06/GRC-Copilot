@@ -1,0 +1,329 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GRC Copilot</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --line: #e3e6ea; --ink: #1a1d21;
+    --muted: #6b7280; --accent: #2563eb; --ok: #15803d; --warn: #b45309;
+    --grey: #6b7280; --okbg: #e9f5ee; --warnbg: #fdf3e3; --greybg: #eef0f3;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 16px 80px; background: var(--bg); color: var(--ink);
+    font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  main { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 28px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 20px; margin-bottom: 16px;
+  }
+  .card h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); margin: 0 0 14px; font-weight: 600;
+  }
+  .card[data-off] { opacity: .45; pointer-events: none; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  input[type=password], input[type=text] {
+    flex: 1; min-width: 220px; padding: 9px 11px; font: inherit;
+    border: 1px solid var(--line); border-radius: 7px; background: #fff;
+  }
+  button {
+    padding: 9px 16px; font: inherit; font-weight: 500; cursor: pointer;
+    border: 1px solid transparent; border-radius: 7px;
+    background: var(--accent); color: #fff;
+  }
+  button.ghost { background: #fff; color: var(--ink); border-color: var(--line); }
+  button:disabled { opacity: .5; cursor: default; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: #cbd0d6; }
+  .dot.on { background: var(--ok); }
+  .note { color: var(--muted); font-size: 13px; margin-top: 10px; }
+  .bar { height: 7px; background: var(--greybg); border-radius: 99px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s; }
+  .counts { display: flex; gap: 20px; margin-top: 12px; font-size: 13px; color: var(--muted); }
+  .counts b { color: var(--ink); font-size: 17px; display: block; font-weight: 600; }
+  .ans {
+    border: 1px solid var(--line); border-left-width: 3px; border-radius: 8px;
+    padding: 14px 16px; margin-bottom: 10px;
+  }
+  .ans.answered { border-left-color: var(--ok); }
+  .ans.review { border-left-color: var(--warn); }
+  .ans.refused { border-left-color: var(--grey); background: #fbfbfc; }
+  .q { font-weight: 600; margin-bottom: 6px; }
+  .a { margin-bottom: 10px; white-space: pre-wrap; }
+  .tags { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tag {
+    font-size: 11px; padding: 2px 8px; border-radius: 99px;
+    background: var(--greybg); color: var(--muted);
+  }
+  .tag.ok { background: var(--okbg); color: var(--ok); }
+  .tag.warn { background: var(--warnbg); color: var(--warn); }
+  .acts { margin-top: 12px; display: flex; gap: 8px; }
+  .acts button { padding: 6px 12px; font-size: 13px; }
+  .err { color: #b91c1c; font-size: 13px; margin-top: 10px; }
+  .drop {
+    border: 1.5px dashed var(--line); border-radius: 9px; padding: 26px;
+    text-align: center; color: var(--muted); cursor: pointer;
+  }
+  .drop.over { border-color: var(--accent); background: #f0f5ff; }
+</style>
+
+<main>
+  <h1>GRC Copilot</h1>
+  <p class="sub">Answers a security questionnaire from your own policy corpus, with citations.
+     Nothing is sent anywhere except this API.</p>
+
+  <section class="card">
+    <h2>1 &nbsp;Connect</h2>
+    <div class="row">
+      <span class="dot" id="dot"></span>
+      <input type="password" id="key" placeholder="X-API-Key" autocomplete="off">
+      <button id="connect">Connect</button>
+    </div>
+    <p class="note" id="connmsg">The key is held for this tab only and is cleared when you close it.</p>
+  </section>
+
+  <section class="card" id="c-upload" data-off>
+    <h2>2 &nbsp;Upload a questionnaire</h2>
+    <div class="drop" id="drop">
+      <div id="dropmsg">Drop a CSV here, or click to choose one</div>
+      <div class="note">Two columns: <code>id,question</code></div>
+    </div>
+    <input type="file" id="file" accept=".csv,text/csv" hidden>
+    <div class="err" id="uperr"></div>
+  </section>
+
+  <section class="card" id="c-run" data-off>
+    <h2>3 &nbsp;Progress</h2>
+    <div class="bar"><i id="bar"></i></div>
+    <div class="counts">
+      <div><b id="n-done">0</b>answered</div>
+      <div><b id="n-review">0</b>need review</div>
+      <div><b id="n-failed">0</b>failed</div>
+      <div><b id="n-total">0</b>total</div>
+    </div>
+    <p class="note" id="runmsg"></p>
+  </section>
+
+  <section class="card" id="c-answers" data-off>
+    <h2>4 &nbsp;Answers</h2>
+    <div id="answers"></div>
+  </section>
+
+  <section class="card" id="c-export" data-off>
+    <h2>5 &nbsp;Export</h2>
+    <div class="row">
+      <button id="export">Download completed CSV</button>
+      <span class="note" id="expmsg"></span>
+    </div>
+  </section>
+</main>
+
+<script>
+// Every value below is rendered with textContent, never innerHTML.
+//
+// The answer text was written by a model that read policy documents this app
+// does not control. A document carrying markup is a prompt-injection path that
+// ends in script running on this page -- and this page holds the API key. So
+// nothing from the API is ever parsed as HTML.
+const $ = (id) => document.getElementById(id);
+const state = { key: "", job: null, timer: null };
+
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text !== undefined && text !== null) node.textContent = String(text);
+  return node;
+}
+
+function enable(id, on) {
+  if (on) $(id).removeAttribute("data-off");
+  else $(id).setAttribute("data-off", "");
+}
+
+async function call(path, options = {}) {
+  const res = await fetch(path, {
+    ...options,
+    headers: { "X-API-Key": state.key, ...(options.headers || {}) },
+  });
+  if (!res.ok) {
+    let detail = res.status + " " + res.statusText;
+    try { detail = (await res.json()).detail || detail; } catch (_) {}
+    throw new Error(detail);
+  }
+  return res;
+}
+
+// --- 1. connect -------------------------------------------------------------
+
+async function connect() {
+  const key = $("key").value.trim();
+  if (!key) return;
+  state.key = key;
+  try {
+    await call("/reviews");                       // any protected route proves it
+    sessionStorage.setItem("grc_key", key);
+    $("dot").classList.add("on");
+    $("connmsg").textContent = "Connected. The key is held for this tab only.";
+    enable("c-upload", true);
+  } catch (err) {
+    state.key = "";
+    $("dot").classList.remove("on");
+    $("connmsg").textContent = "Rejected: " + err.message;
+  }
+}
+
+$("connect").addEventListener("click", connect);
+$("key").addEventListener("keydown", (e) => { if (e.key === "Enter") connect(); });
+
+// --- 2. upload --------------------------------------------------------------
+
+$("drop").addEventListener("click", () => $("file").click());
+$("drop").addEventListener("dragover", (e) => { e.preventDefault(); $("drop").classList.add("over"); });
+$("drop").addEventListener("dragleave", () => $("drop").classList.remove("over"));
+$("drop").addEventListener("drop", (e) => {
+  e.preventDefault();
+  $("drop").classList.remove("over");
+  if (e.dataTransfer.files[0]) upload(e.dataTransfer.files[0]);
+});
+$("file").addEventListener("change", (e) => { if (e.target.files[0]) upload(e.target.files[0]); });
+
+async function upload(file) {
+  $("uperr").textContent = "";
+  $("dropmsg").textContent = "Uploading " + file.name + "...";
+  const body = new FormData();
+  body.append("file", file);
+  try {
+    const res = await call("/questionnaires", { method: "POST", body });
+    const job = await res.json();
+    state.job = job.job_id;
+    $("dropmsg").textContent = file.name + " -- " + job.questions + " questions";
+    enable("c-run", true);
+    $("n-total").textContent = job.questions;
+    poll();
+  } catch (err) {
+    $("dropmsg").textContent = "Drop a CSV here, or click to choose one";
+    $("uperr").textContent = err.message;
+  }
+}
+
+// --- 3. progress ------------------------------------------------------------
+
+async function poll() {
+  clearTimeout(state.timer);
+  let job;
+  try {
+    job = await (await call("/questionnaires/" + state.job)).json();
+  } catch (err) {
+    $("runmsg").textContent = err.message;
+    return;
+  }
+  $("bar").style.width = Math.round(job.progress * 100) + "%";
+  $("n-done").textContent = job.completed - job.needs_review - job.failed;
+  $("n-review").textContent = job.needs_review;
+  $("n-failed").textContent = job.failed;
+  $("n-total").textContent = job.total;
+
+  if (job.status === "running") {
+    $("runmsg").textContent = "Working through " + job.total + " questions...";
+    state.timer = setTimeout(poll, 2000);
+    return;
+  }
+  $("runmsg").textContent = job.error ? job.error : "Finished.";
+  loadAnswers();
+}
+
+// --- 4. answers -------------------------------------------------------------
+
+function card(a) {
+  const refused = a.answerable === false;
+  const kind = refused ? "refused" : (a.status === "needs_review" ? "review" : "answered");
+  const box = el("div", "ans " + kind);
+
+  box.append(el("div", "q", a.question_id + ". " + a.question));
+  box.append(el("div", "a", a.answer || "(no answer)"));
+
+  const tags = el("div", "tags");
+  if (refused) {
+    tags.append(el("span", "tag", "not covered by the corpus"));
+  } else {
+    const conf = a.confidence || "unknown";
+    tags.append(el("span", "tag " + (conf === "high" ? "ok" : "warn"), conf + " confidence"));
+  }
+  if (a.reviewed_by_human) tags.append(el("span", "tag ok", "approved by a human"));
+  a.citations.forEach((c) => tags.append(el("span", "tag", c)));
+  a.controls.forEach((c) => tags.append(el("span", "tag", c)));
+  a.soc2.forEach((c) => tags.append(el("span", "tag", "SOC 2 " + c)));
+  box.append(tags);
+
+  if (a.status === "needs_review") {
+    const acts = el("div", "acts");
+    const ok = el("button", null, "Approve");
+    const edit = el("button", "ghost", "Edit and approve");
+    const no = el("button", "ghost", "Reject");
+    ok.onclick = () => decide(a, "approve", {});
+    edit.onclick = () => {
+      const answer = prompt("Replacement answer:", a.answer || "");
+      if (answer) decide(a, "approve", { answer });
+    };
+    no.onclick = () => {
+      const reason = prompt("Why is this being rejected?", "");
+      if (reason !== null) decide(a, "reject", { reason });
+    };
+    acts.append(ok, edit, no);
+    box.append(acts);
+  }
+  return box;
+}
+
+async function decide(a, action, body) {
+  try {
+    await call("/reviews/" + state.job + "/" + a.question_id + "/" + action, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    loadAnswers();
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+async function loadAnswers() {
+  let rows;
+  try {
+    rows = await (await call("/questionnaires/" + state.job + "/answers")).json();
+  } catch (err) {
+    $("runmsg").textContent = err.message;
+    return;
+  }
+  const list = $("answers");
+  list.textContent = "";
+  rows.forEach((a) => list.append(card(a)));
+  enable("c-answers", true);
+  enable("c-export", true);
+}
+
+// --- 5. export --------------------------------------------------------------
+
+$("export").addEventListener("click", async () => {
+  $("expmsg").textContent = "";
+  try {
+    const res = await call("/questionnaires/" + state.job + "/export.csv");
+    const url = URL.createObjectURL(await res.blob());
+    const link = el("a");
+    link.href = url;
+    link.download = state.job + "-answers.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    $("expmsg").textContent = err.message;
+  }
+});
+
+// Restore the key on a reload, so a refresh mid-run is not a restart.
+const saved = sessionStorage.getItem("grc_key");
+if (saved) { $("key").value = saved; connect(); }
+</script>

@@ -33,6 +33,23 @@ document, so it survives an auditor.
 
 **Sold to the startup, not the enterprise.**
 
+## Try it
+
+Deployed on AWS. Open the page, paste the API key, drop a CSV of `id,question`:
+
+**https://ijklxzd7m7.execute-api.us-east-1.amazonaws.com/ui**
+
+```
+connect ─▶ upload ─▶ watch it answer ─▶ approve or reject ─▶ download the CSV
+```
+
+`data/questionnaires/vendor_assessment.csv` is a 17-question third-party assessment written
+against the deployed corpus. Four of its questions — recovery objectives, SOC 2, bug bounty,
+TLS version — have no answer in that corpus, and the system refuses them. That is the thing
+worth watching, not the thirteen it answers.
+
+Prefer the raw API? `/docs` is the OpenAPI console; `/` lists every endpoint.
+
 ## Status
 
 | Week | Focus | Status |
@@ -242,7 +259,7 @@ Decisions: [ADR-0012 Dagster](docs/adr/0012-dagster-for-ingestion.md),
 
 ### What week 6 deployed
 
-Live on AWS. `git push` runs the checks; `tofu apply` deploys.
+Live on AWS, with a browser UI at `/ui`. `git push` runs the checks; `tofu apply` deploys.
 
 ```
 API Gateway (HTTP API) ─▶ Lambda (FastAPI via Mangum) ─▶ Bedrock

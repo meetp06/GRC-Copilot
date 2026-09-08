@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import csv
+import io
+import re
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -10,6 +14,7 @@ from fastapi.testclient import TestClient
 
 from src.api import jobs
 from src.api.main import (
+    Answer,
     MAX_QUESTIONS,
     MAX_UPLOAD_BYTES,
     _expected_api_key,
@@ -322,3 +327,129 @@ def test_the_root_route_is_open_and_says_what_this_is(client, monkeypatch) -> No
     body = response.json()
     assert "endpoints" in body and body["endpoints"]
     assert "X-API-Key" in body["auth"]
+
+
+# --- the completed questionnaire comes back out ------------------------------
+
+
+def test_the_openapi_document_declares_the_key_so_docs_can_authorise() -> None:
+    """Without a declared security scheme /docs renders but cannot authorise.
+
+    Every call from the interactive docs then returns 401, which reads as a
+    broken API rather than a protected one. The scheme is what puts the
+    Authorize button there, so it is worth asserting rather than eyeballing.
+    """
+    schema = TestClient(app).get("/openapi.json").json()
+    schemes = schema["components"]["securitySchemes"]
+    assert any(
+        s.get("in") == "header" and s.get("name") == "X-API-Key"
+        for s in schemes.values()
+    ), schemes
+
+    protected = schema["paths"]["/reviews"]["get"]
+    assert protected.get("security"), "a data route must carry the requirement"
+    assert not schema["paths"]["/health"]["get"].get("security")
+
+
+def test_export_returns_a_csv_a_spreadsheet_will_not_execute(client, monkeypatch):
+    """The export is opened in Excel by a security team, so a cell that starts
+    with '=' must arrive as text. Same escape as the batch exporter, which is
+    why csv_safe is imported there rather than written twice."""
+    hostile = Answer(
+        question_id="q1",
+        job_id="j1",
+        question="Do you encrypt data at rest?",
+        status="answered",
+        answerable=True,
+        answer='=cmd|"/c calc"!A1',
+        confidence="high",
+        citations=["policy.md :: F. Information Protection"],
+        controls=["SC-28"],
+        soc2=["CC6.1"],
+        reviewed_by_human=True,
+    )
+    monkeypatch.setattr("src.api.main.job_answers", lambda job_id: [hostile])
+
+    response = client.get("/questionnaires/j1/export.csv")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/csv")
+    assert "attachment" in response.headers["content-disposition"]
+
+    rows = list(csv.DictReader(io.StringIO(response.text)))
+    assert rows[0]["answer"].startswith("'="), rows[0]["answer"]
+    assert rows[0]["citations"] == "policy.md :: F. Information Protection"
+    assert rows[0]["controls"] == "SC-28"
+
+
+def test_export_needs_the_key_like_every_other_data_route(client, monkeypatch) -> None:
+    monkeypatch.setenv("GRC_API_KEY", "secret")
+    _expected_api_key.cache_clear()
+    assert client.get("/questionnaires/j1/export.csv").status_code == 401
+
+
+def test_a_job_id_cannot_inject_a_response_header(client, monkeypatch) -> None:
+    """job_id reaches Content-Disposition. It is ours by the time it gets there
+    -- job_answers 404s first -- but a filename built from a path parameter is
+    the shape of a header-injection bug, so it is stripped rather than trusted."""
+    monkeypatch.setattr("src.api.main.job_answers", lambda job_id: [])
+
+    response = client.get('/questionnaires/a"b%0d%0aX-Evil:%201/export.csv')
+
+    assert response.status_code == 200
+    disposition = response.headers["content-disposition"]
+    assert disposition == 'attachment; filename="abX-Evil1-answers.csv"'
+    # The property that matters, stated separately from the exact string: nothing
+    # inside the filename can close the quote or start a second header.
+    filename = disposition.split('"')[1]
+    assert not set(filename) & set('";\r\n :')
+
+
+# --- the page a person uses --------------------------------------------------
+
+
+def test_the_ui_is_served_without_a_key_and_is_not_in_the_schema(
+    client, monkeypatch
+) -> None:
+    """The page is markup. It carries no answer, no question and no key, so
+    requiring a credential to fetch it would only mean nobody could reach the
+    place where the credential is entered."""
+    monkeypatch.setenv("GRC_API_KEY", "secret")
+    _expected_api_key.cache_clear()
+
+    response = client.get("/ui")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "GRC Copilot" in response.text
+    assert "/ui" not in client.get("/openapi.json").json()["paths"]
+
+
+def test_the_ui_never_parses_api_output_as_html() -> None:
+    """The defect this guards against: a policy document carries markup, the
+    model repeats it in an answer, the page renders it, and the script it
+    contains reads the API key out of sessionStorage.
+
+    Prompt injection reaching a browser -- THREAT-MODEL T1 on a new surface.
+    Asserted against the file because a runtime test would need the injection to
+    already exist to catch it.
+    """
+    source = (Path(__file__).resolve().parents[1] / "src/api/ui.html").read_text()
+    # Comments stripped first: the file explains why it avoids innerHTML, and a
+    # naive substring check fails on the explanation rather than on any code.
+    source = re.sub(r"//.*", "", source)
+
+    assert "innerHTML" not in source
+    assert "insertAdjacentHTML" not in source
+    assert "document.write" not in source
+    assert "eval(" not in source
+
+
+def test_the_ui_may_not_talk_to_another_host(client) -> None:
+    """Second line of defence, for the case where the first one fails: even if
+    markup did execute on the page, connect-src 'self' stops it posting the key
+    somewhere else."""
+    csp = client.get("/ui").headers["content-security-policy"]
+
+    assert "connect-src 'self'" in csp
+    assert "frame-ancestors 'none'" in csp

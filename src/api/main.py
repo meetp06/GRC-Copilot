@@ -44,6 +44,7 @@ from typing import Annotated
 import functools
 import hmac
 import os
+from pathlib import Path
 
 from fastapi import (
     APIRouter,
@@ -51,15 +52,18 @@ from fastapi import (
     Depends,
     FastAPI,
     File,
-    Header,
     HTTPException,
+    Security,
     UploadFile,
 )
+from fastapi.responses import HTMLResponse, Response
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
 from src.api import telemetry
 from src.api.jobs import Job
 from src.api.store import index_dir, job_store, on_lambda, open_checkpointer
+from src.graph.batch import csv_safe
 from src.graph.build import build_graph, resume
 from src.graph.checkpoint import thread_config
 from src.graph.controls import controls_for
@@ -89,7 +93,20 @@ def _expected_api_key() -> str | None:
     return boto3.client("secretsmanager").get_secret_value(SecretId=arn)["SecretString"]
 
 
-def require_api_key(x_api_key: Annotated[str | None, Header()] = None) -> None:
+# Declared as a security scheme rather than a plain Header, so the key appears
+# in the OpenAPI document. That is what puts the Authorize button in /docs --
+# without it the interactive docs render every endpoint and every call from them
+# returns 401, which reads as a broken API rather than a protected one.
+#
+# auto_error=False so the 401 is raised below, with our message, and so an
+# unset GRC_API_KEY still means open -- the local development mode described
+# in the docstring.
+api_key_scheme = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def require_api_key(
+    x_api_key: Annotated[str | None, Security(api_key_scheme)] = None,
+) -> None:
     """Reject a request without the shared key.
 
     A shared key is the weakest thing that is not nothing. It gives no identity,
@@ -138,6 +155,23 @@ MAX_UPLOAD_BYTES = 2 * 1024 * 1024
 MAX_QUESTIONS = 500
 
 INDEX_NAME = "real"
+
+UI_PATH = Path(__file__).parent / "ui.html"
+
+# Even though the page never parses API output as HTML, a second line of defence
+# is cheap here. connect-src 'self' is the one that matters: if markup ever did
+# execute, it still could not post the API key to another host. 'unsafe-inline'
+# is required because the page is one file with no build step -- the trade is
+# stated rather than hidden.
+UI_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "connect-src 'self'; "
+    "img-src 'self' data:; "
+    "form-action 'none'; "
+    "frame-ancestors 'none'"
+)
 
 
 def thread_id(job_id: str, question_id: str) -> str:
@@ -376,10 +410,12 @@ def root() -> dict:
         "source": "https://github.com/meetp06/GRC-Copilot",
         "auth": "Send X-API-Key on everything except / and /health.",
         "endpoints": {
+            "GET  /ui": "the page a person uses -- start here",
             "GET  /health": "index status, no key required",
             "POST /questionnaires": "upload a CSV of id,question -- returns a job id",
             "GET  /questionnaires/{job}": "progress",
             "GET  /questionnaires/{job}/answers": "answers, citations, NIST controls, SOC 2",
+            "GET  /questionnaires/{job}/export.csv": "the completed questionnaire, for a spreadsheet",
             "GET  /reviews": "answers awaiting a human",
             "POST /reviews/{job}/{question}/approve": "approve, optionally with an edit",
             "POST /reviews/{job}/{question}/reject": "reject",
@@ -387,6 +423,23 @@ def root() -> dict:
             "GET  /gaps": "controls with no policy behind them",
         },
     }
+
+
+@app.get("/ui", response_class=HTMLResponse, include_in_schema=False)
+def ui() -> HTMLResponse:
+    """The page a person uses, as opposed to /docs which is for a developer.
+
+    Unauthenticated because it is markup and nothing else -- no answer, no
+    question, no key. The key is typed into the page by whoever opens it, and
+    every call the page makes carries it like any other client.
+
+    Served from the API rather than from S3 so that it shares an origin with the
+    API: no CORS to configure, and therefore no CORS to configure wrongly.
+    """
+    return HTMLResponse(
+        UI_PATH.read_text(encoding="utf-8"),
+        headers={"Content-Security-Policy": UI_CSP},
+    )
 
 
 @app.get("/health")
@@ -473,6 +526,68 @@ def job_answers(job_id: str) -> list[Answer]:
         )
         for qid in store.question_ids(job_id)
     ]
+
+
+EXPORT_COLUMNS = [
+    "id",
+    "question",
+    "answer",
+    "confidence",
+    "citations",
+    "controls",
+    "soc2",
+    "status",
+    "reviewed_by_human",
+]
+
+
+@api.get(
+    "/questionnaires/{job_id}/export.csv",
+    response_class=Response,
+    responses={200: {"content": {"text/csv": {}}}},
+)
+def export_answers(job_id: str) -> Response:
+    """The completed questionnaire as a CSV, in the shape a buyer opens in Excel.
+
+    This is the artifact the customer actually wants back; /answers returns the
+    same data as JSON for a program to consume.
+
+    csv_safe is imported from the batch exporter rather than reimplemented. Two
+    copies of a formula-injection escape is two places for it to rot, and this
+    one is newer -- see MISTAKES, where the batch export shipped without it.
+    """
+    rows = job_answers(job_id)
+
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=EXPORT_COLUMNS)
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(
+            {
+                "id": csv_safe(row.question_id),
+                "question": csv_safe(row.question),
+                "answer": csv_safe(row.answer),
+                "confidence": csv_safe(row.confidence),
+                # Semicolons, not commas: each of these is one cell.
+                "citations": csv_safe("; ".join(row.citations)),
+                "controls": csv_safe("; ".join(row.controls)),
+                "soc2": csv_safe("; ".join(row.soc2)),
+                "status": csv_safe(row.status),
+                "reviewed_by_human": row.reviewed_by_human,
+            }
+        )
+
+    # job_id reaches a response header, so it is restricted to characters that
+    # cannot terminate one. job_answers has already 404ed on an unknown id, so
+    # this is defence in depth rather than the only check.
+    safe_id = "".join(c for c in job_id if c.isalnum() or c in "-_")[:64]
+    return Response(
+        content=buffer.getvalue(),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_id}-answers.csv"'
+        },
+    )
 
 
 def _question_text(graph, thread: str) -> str:
