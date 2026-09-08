@@ -68,6 +68,21 @@ curl "$URL/reviews"             -H "X-API-Key: $KEY"
 curl -X POST "$URL/reviews/{job}/{question}/approve" -H "X-API-Key: $KEY" -d '{}'
 ```
 
+## Or just run the scripts
+
+```bash
+scripts/up.sh      # package, apply, upload the index, smoke test  (~5 min)
+scripts/down.sh    # destroy, and verify the state is actually empty
+```
+
+`up.sh` refuses to deploy when `GRC_API_KEY` is missing or empty. `require_api_key` treats an
+unset key as "open", which is correct for local development and catastrophic on a public URL:
+the API would come up, work perfectly, and be readable by anyone who found it.
+
+`down.sh` checks `tofu state list` afterwards and exits non-zero if anything survived. A
+destroy that half-works reports success and leaves resources billing -- which is what happened
+the first time (`MISTAKES.md` 49).
+
 ## Take it down
 
 ```bash
