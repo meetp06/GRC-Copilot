@@ -309,3 +309,16 @@ def test_the_worker_writes_namespaced_threads(tmp_path, monkeypatch) -> None:
     source = (Path(__file__).resolve().parents[1] / "src/api/main.py").read_text()
     bare = re.findall(r"thread_config\((?!thread\b|thread_id\()([^)]*)\)", source)
     assert not bare, f"thread_config called without namespacing: {bare}"
+
+
+def test_the_root_route_is_open_and_says_what_this_is(client, monkeypatch) -> None:
+    """Opening the URL in a browser returned {"detail":"Not Found"} -- correct,
+    since nothing was routed at "/", and useless to whoever clicked the link."""
+    monkeypatch.setenv("GRC_API_KEY", "secret")
+    _expected_api_key.cache_clear()
+
+    response = client.get("/")
+    assert response.status_code == 200, "the root must not require a key"
+    body = response.json()
+    assert "endpoints" in body and body["endpoints"]
+    assert "X-API-Key" in body["auth"]

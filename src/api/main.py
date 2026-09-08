@@ -357,6 +357,38 @@ def answer_for(
 # routes
 
 
+@app.get("/")
+def root() -> dict:
+    """What this is and how to call it.
+
+    Unauthenticated, like /health, and it lists endpoints without exposing any
+    data. Someone opening the URL in a browser previously got
+    {"detail":"Not Found"}, which is correct and useless -- there is no route at
+    "/", and nothing said so.
+    """
+    return {
+        "service": "GRC Copilot",
+        "description": (
+            "Answers security questionnaires from a company's own policy corpus, "
+            "with a citation for every answer."
+        ),
+        "docs": "/docs",
+        "source": "https://github.com/meetp06/GRC-Copilot",
+        "auth": "Send X-API-Key on everything except / and /health.",
+        "endpoints": {
+            "GET  /health": "index status, no key required",
+            "POST /questionnaires": "upload a CSV of id,question -- returns a job id",
+            "GET  /questionnaires/{job}": "progress",
+            "GET  /questionnaires/{job}/answers": "answers, citations, NIST controls, SOC 2",
+            "GET  /reviews": "answers awaiting a human",
+            "POST /reviews/{job}/{question}/approve": "approve, optionally with an edit",
+            "POST /reviews/{job}/{question}/reject": "reject",
+            "GET  /controls/{label}": "one NIST control and what satisfies it",
+            "GET  /gaps": "controls with no policy behind them",
+        },
+    }
+
+
 @app.get("/health")
 def health() -> dict:
     """Reports whether the index is actually loadable, not just that the process

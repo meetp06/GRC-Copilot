@@ -334,6 +334,9 @@ the next week's work.
 | [docs/MISTAKES-TO-HUNT.md](docs/MISTAKES-TO-HUNT.md) | Failures to trigger deliberately, per week |
 | [docs/INTERVIEW-PREP.md](docs/INTERVIEW-PREP.md) | The two-minute story, question bank, JD mapping |
 | [docs/COST-GUARDRAILS.md](docs/COST-GUARDRAILS.md) | AWS cost safety rules |
+| [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) | Seven threats, and how partial each mitigation is |
+| [docs/COMPLIANCE.md](docs/COMPLIANCE.md) | This product's own compliance posture, honestly |
+| [docs/aws/DEPLOY.md](docs/aws/DEPLOY.md) | Deploying, and taking it down again |
 | [docs/adr/](docs/adr/) | Architecture Decision Records |
 | [MISTAKES.md](MISTAKES.md) | Running bug log |
 
