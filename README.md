@@ -35,13 +35,19 @@ document, so it survives an auditor.
 
 ## Try it
 
-Deployed on AWS. Open the page, paste the API key, drop a CSV of `id,question`:
-
-**https://ijklxzd7m7.execute-api.us-east-1.amazonaws.com/ui**
+There is a browser UI at `/ui`:
 
 ```
 connect ─▶ upload ─▶ watch it answer ─▶ approve or reject ─▶ download the CSV
 ```
+
+It is **not currently deployed**, and that is deliberate. Two KMS customer-managed keys cost
+$1/month each whether or not anyone calls the API, and this project's budget is $5/month
+(`docs/COST-GUARDRAILS.md`). The whole stack is 27 OpenTofu resources and comes up in about
+four minutes -- `docs/aws/DEPLOY.md` has the four commands. It ran live on 2026-09-07;
+`MISTAKES.md` 35-49 is what that cost me.
+
+Locally, `uvicorn src.api.main:app` and open `http://127.0.0.1:8000/ui`.
 
 `data/questionnaires/vendor_assessment.csv` is a 17-question third-party assessment written
 against the deployed corpus. Four of its questions — recovery objectives, SOC 2, bug bounty,
@@ -259,7 +265,7 @@ Decisions: [ADR-0012 Dagster](docs/adr/0012-dagster-for-ingestion.md),
 
 ### What week 6 deployed
 
-Live on AWS, with a browser UI at `/ui`. `git push` runs the checks; `tofu apply` deploys.
+Deployable to AWS in four minutes, with a browser UI at `/ui`. `git push` runs the checks; `tofu apply` deploys, `tofu destroy` takes it down to nothing.
 
 ```
 API Gateway (HTTP API) ─▶ Lambda (FastAPI via Mangum) ─▶ Bedrock
