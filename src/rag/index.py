@@ -68,14 +68,19 @@ class VectorIndex:
         )
 
     @classmethod
-    def load(cls, strategy: str = DEFAULT_STRATEGY) -> VectorIndex:
-        vectors_path = INDEX_DIR / f"{strategy}.npy"
+    def load(
+        cls, strategy: str = DEFAULT_STRATEGY, index_dir: Path | None = None
+    ) -> VectorIndex:
+        """Load a saved index. `index_dir` lets a caller point at a downloaded
+        copy -- on Lambda the index comes from S3 into /tmp, not from the repo."""
+        directory = index_dir or INDEX_DIR
+        vectors_path = directory / f"{strategy}.npy"
         if not vectors_path.exists():
             raise FileNotFoundError(
                 f"no index for '{strategy}'. Run: python -m src.rag.index build"
             )
         chunks = json.loads(
-            (INDEX_DIR / f"{strategy}.json").read_text(encoding="utf-8")
+            (directory / f"{strategy}.json").read_text(encoding="utf-8")
         )
         return cls(np.load(vectors_path), chunks)
 

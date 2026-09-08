@@ -32,3 +32,14 @@ data/ontology/*.sqlite
 
 data/jobs.sqlite
 data/telemetry.sqlite
+
+# terraform / opentofu
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.*
+infra/.terraform.lock.hcl
+*.tfvars
+build/
+
+# lambda build output and terraform state
+build/

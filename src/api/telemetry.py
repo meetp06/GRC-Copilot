@@ -33,6 +33,10 @@ from __future__ import annotations
 import sqlite3
 import statistics
 import sys
+import json
+import logging
+import os
+import tempfile
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,6 +45,7 @@ from time import perf_counter
 from rich.console import Console
 
 console = Console()
+log = logging.getLogger("grc.telemetry")
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DB_PATH = REPO_ROOT / "data" / "telemetry.sqlite"
@@ -76,8 +81,22 @@ CREATE INDEX IF NOT EXISTS idx_run_job ON run(job_id);
 """
 
 
+def _default_path() -> Path:
+    """Where the telemetry database lives.
+
+    On Lambda the package directory is read-only, so this goes to /tmp -- which
+    means it is lost on a cold start. That is why record() also emits a
+    structured log line: the file is for local analysis, CloudWatch is the
+    durable copy. Writing straight to the repo path was a 500 on the first
+    upload after deploying.
+    """
+    if os.environ.get("JOBS_TABLE"):
+        return Path(tempfile.gettempdir()) / "telemetry.sqlite"
+    return DB_PATH
+
+
 def connect(path: Path | None = None) -> sqlite3.Connection:
-    db_path = path or DB_PATH
+    db_path = path or _default_path()
     db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
@@ -118,6 +137,31 @@ def record(
     is swallowed: the answer has already been produced and paid for.
     """
     stage_ms = stage_ms or {}
+
+    # One structured line per question, so the numbers survive a container that
+    # is thrown away. Explicitly no question, prompt or answer text -- the same
+    # rule as the table's schema, and for the same reason.
+    log.info(
+        json.dumps(
+            {
+                "event": "question_answered",
+                "job_id": job_id,
+                "question_id": state.get("question_id"),
+                "status": state.get("status"),
+                "answerable": bool(state.get("answerable")),
+                "verified": bool(state.get("verified")),
+                "revisions": state.get("revision_count", 0),
+                "citations": len(state.get("citations", [])),
+                "total_ms": total_ms,
+                "input_tokens": state.get("input_tokens", 0),
+                "output_tokens": state.get("output_tokens", 0),
+                "usd": round(
+                    usd(state.get("input_tokens", 0), state.get("output_tokens", 0)), 6
+                ),
+            }
+        )
+    )
+
     try:
         conn.execute(
             """

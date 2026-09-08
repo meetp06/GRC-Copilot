@@ -12,11 +12,22 @@ from src.api import jobs
 from src.api.main import (
     MAX_QUESTIONS,
     MAX_UPLOAD_BYTES,
+    _expected_api_key,
     app,
     read_questionnaire_csv,
     require_api_key,
     thread_id,
 )
+
+
+@pytest.fixture(autouse=True)
+def _fresh_api_key_cache():
+    """The configured key is cached for the life of the process, because reading
+    it from Secrets Manager on every request would add latency and cost to all
+    of them. That makes it sticky across tests, so clear it around each one."""
+    _expected_api_key.cache_clear()
+    yield
+    _expected_api_key.cache_clear()
 
 
 @pytest.fixture
@@ -165,11 +176,13 @@ def test_no_key_configured_means_open_for_local_use(monkeypatch) -> None:
     """The test suite and local development must work without a key. The startup
     mode is explicit rather than accidental."""
     monkeypatch.delenv("GRC_API_KEY", raising=False)
+    _expected_api_key.cache_clear()
     require_api_key(None)  # must not raise
 
 
 def test_a_configured_key_is_required(monkeypatch) -> None:
     monkeypatch.setenv("GRC_API_KEY", "secret")
+    _expected_api_key.cache_clear()
     with pytest.raises(HTTPException) as err:
         require_api_key(None)
     assert err.value.status_code == 401
@@ -190,6 +203,7 @@ def test_every_data_route_requires_the_key_and_health_does_not(
     reachable without one.
     """
     monkeypatch.setenv("GRC_API_KEY", "secret")
+    _expected_api_key.cache_clear()
 
     assert client.get("/health").status_code != 401, "health must not need a key"
 
@@ -277,3 +291,21 @@ def test_cost_is_computed_from_tokens_not_guessed(tmp_path) -> None:
         100,
     )
     assert abs(telemetry.summary(conn)["usd_total"] - 0.06) < 1e-9
+
+
+def test_the_worker_writes_namespaced_threads(tmp_path, monkeypatch) -> None:
+    """The regression that reached production: run_job called thread_config with
+    the bare question id, so two tenants' q1 shared a checkpoint. Three separate
+    string-replace patches to this file silently missed this call site, and the
+    bug was only visible by reading the deployed DynamoDB table -- the partition
+    keys were "e3" and "f1" rather than "{job}:{question}".
+
+    Asserted on the source rather than by running the worker, because running it
+    needs Bedrock. A grep-shaped test is a poor test in general and the right one
+    here: the failure mode was an edit that did not apply."""
+    import re
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1] / "src/api/main.py").read_text()
+    bare = re.findall(r"thread_config\((?!thread\b|thread_id\()([^)]*)\)", source)
+    assert not bare, f"thread_config called without namespacing: {bare}"

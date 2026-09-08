@@ -41,6 +41,7 @@ import io
 import threading
 from typing import Annotated
 
+import functools
 import hmac
 import os
 
@@ -56,15 +57,36 @@ from fastapi import (
 )
 from pydantic import BaseModel, Field
 
-from src.api import jobs, telemetry
+from src.api import telemetry
+from src.api.jobs import Job
+from src.api.store import index_dir, job_store, on_lambda, open_checkpointer
 from src.graph.build import build_graph, resume
-from src.graph.checkpoint import open_checkpointer, thread_config
+from src.graph.checkpoint import thread_config
 from src.graph.controls import controls_for
 from src.ontology.store import connect as ontology_connect
 from src.rag.index import VectorIndex
 
 # --------------------------------------------------------------------------
 # authentication
+
+
+@functools.lru_cache(maxsize=1)
+def _expected_api_key() -> str | None:
+    """The configured key, from Secrets Manager on Lambda and the environment
+    locally.
+
+    Cached: a Secrets Manager call per request would add latency and cost to
+    every single request, and the value does not change within a container's
+    life. Rotating the key means a new deployment, which is stated in the
+    threat model rather than pretended otherwise.
+    """
+    arn = os.environ.get("API_KEY_SECRET_ARN")
+    if not arn:
+        return os.environ.get("GRC_API_KEY")
+
+    import boto3
+
+    return boto3.client("secretsmanager").get_secret_value(SecretId=arn)["SecretString"]
 
 
 def require_api_key(x_api_key: Annotated[str | None, Header()] = None) -> None:
@@ -84,7 +106,7 @@ def require_api_key(x_api_key: Annotated[str | None, Header()] = None) -> None:
     hmac.compare_digest rather than ==, so the comparison does not leak the key
     one character at a time through response timing.
     """
-    expected = os.environ.get("GRC_API_KEY")
+    expected = _expected_api_key()
     if not expected:
         return
     if not x_api_key or not hmac.compare_digest(x_api_key, expected):
@@ -145,7 +167,9 @@ def index() -> VectorIndex:
     global _index
     with _lock:
         if _index is None:
-            _index = VectorIndex.load(INDEX_NAME)
+            # index_dir() downloads from S3 on Lambda and is a local path
+            # otherwise, so this line is the same in both.
+            _index = VectorIndex.load(INDEX_NAME, index_dir())
     return _index
 
 
@@ -244,10 +268,10 @@ def run_job(job_id: str, rows: list[dict]) -> None:
     One question failing does not fail the job: a batch of 200 that dies on
     question 3 has wasted the other 197. Failures are counted and reported.
     """
-    conn = jobs.connect()
+    store = job_store()
     checkpointer = open_checkpointer()
     graph = build_graph(index(), checkpointer=checkpointer)
-    jobs.mark(conn, job_id, status="running")
+    store.mark(job_id, status="running")
 
     metrics = telemetry.connect()
     completed = needs_review = failed = 0
@@ -260,13 +284,16 @@ def run_job(job_id: str, rows: list[dict]) -> None:
                         "question_id": row["id"],
                         "status": "retrieving",
                     },
-                    config=thread_config(row["id"]),
+                    config=thread_config(thread_id(job_id, row["id"])),
                 )
             if "__interrupt__" in out:
                 needs_review += 1
             # Read the settled state rather than the invoke() return: an
             # interrupted run returns the interrupt payload, not the counters.
-            state = graph.get_state(thread_config(row["id"])).values or {}
+            state = (
+                graph.get_state(thread_config(thread_id(job_id, row["id"]))).values
+                or {}
+            )
             telemetry.record(
                 metrics,
                 {**state, "question_id": row["id"]},
@@ -278,15 +305,21 @@ def run_job(job_id: str, rows: list[dict]) -> None:
             # prompt, which contains customer policy content.
             failed += 1
         completed += 1
-        jobs.mark(
-            conn,
-            job_id,
-            completed=completed,
-            needs_review=needs_review,
-            failed=failed,
-        )
+        # The DynamoDB store adds to its counters and the SQLite one assigns,
+        # so send the delta or the total depending on which is behind this.
+        if getattr(store, "counters_are_additive", False):
+            store.mark(job_id, completed=1)
+        else:
+            store.mark(
+                job_id,
+                completed=completed,
+                needs_review=needs_review,
+                failed=failed,
+            )
 
-    jobs.finish(conn, job_id, "done" if failed < len(rows) else "failed")
+    if getattr(store, "counters_are_additive", False):
+        store.mark(job_id, needs_review=needs_review, failed=failed)
+    store.finish(job_id, "done" if failed < len(rows) else "failed")
 
 
 def answer_for(
@@ -343,10 +376,18 @@ def submit(
     file: Annotated[UploadFile, File(description="CSV with id,question columns")],
 ) -> JobAccepted:
     rows = read_questionnaire_csv(file.file.read(), file.filename or "upload.csv")
-    conn = jobs.connect()
-    job_id = jobs.create(conn, file.filename or "upload.csv", [r["id"] for r in rows])
+    store = job_store()
+    job_id = store.create(file.filename or "upload.csv", [r["id"] for r in rows])
 
-    threading.Thread(target=run_job, args=(job_id, rows), daemon=True).start()
+    if on_lambda():
+        # A daemon thread does not survive the response on Lambda: the runtime
+        # freezes the container the moment the handler returns, and the thread
+        # resumes only if another request happens to land on it. So the work runs
+        # inline, which is why the API caps a questionnaire at 500 questions --
+        # comfortably inside the 300-second function timeout.
+        run_job(job_id, rows)
+    else:
+        threading.Thread(target=run_job, args=(job_id, rows), daemon=True).start()
     return JobAccepted(
         job_id=job_id, questions=len(rows), status_url=f"/questionnaires/{job_id}"
     )
@@ -356,11 +397,11 @@ def submit(
 def list_jobs(limit: int = 20) -> list[JobStatus]:
     return [
         JobStatus(job_id=j.id, progress=round(j.progress, 3), **_job_fields(j))
-        for j in jobs.recent(jobs.connect(), limit)
+        for j in job_store().recent(limit)
     ]
 
 
-def _job_fields(job: jobs.Job) -> dict:
+def _job_fields(job: Job) -> dict:
     return {
         "filename": job.filename,
         "status": job.status,
@@ -376,7 +417,7 @@ def _job_fields(job: jobs.Job) -> dict:
 
 @api.get("/questionnaires/{job_id}", response_model=JobStatus)
 def job_status(job_id: str) -> JobStatus:
-    job = jobs.get(jobs.connect(), job_id)
+    job = job_store().get(job_id)
     if not job:
         raise HTTPException(404, "no such job")
     return JobStatus(job_id=job.id, progress=round(job.progress, 3), **_job_fields(job))
@@ -384,37 +425,49 @@ def job_status(job_id: str) -> JobStatus:
 
 @api.get("/questionnaires/{job_id}/answers", response_model=list[Answer])
 def job_answers(job_id: str) -> list[Answer]:
-    conn = jobs.connect()
-    job = jobs.get(conn, job_id)
+    store = job_store()
+    job = store.get(job_id)
     if not job:
         raise HTTPException(404, "no such job")
 
     graph = build_graph(index(), checkpointer=open_checkpointer())
     return [
-        answer_for(graph, qid, _question_text(graph, qid))
-        for qid in jobs.question_ids(conn, job_id)
+        answer_for(
+            graph,
+            thread_id(job_id, qid),
+            qid,
+            _question_text(graph, thread_id(job_id, qid)),
+            job_id,
+        )
+        for qid in store.question_ids(job_id)
     ]
 
 
-def _question_text(graph, question_id: str) -> str:
-    return (graph.get_state(thread_config(question_id)).values or {}).get(
-        "question", ""
-    )
+def _question_text(graph, thread: str) -> str:
+    return (graph.get_state(thread_config(thread)).values or {}).get("question", "")
 
 
 @api.get("/reviews", response_model=list[Answer])
 def reviews() -> list[Answer]:
     """Everything parked at the human-review interrupt, across all jobs."""
-    conn = jobs.connect()
+    store = job_store()
     graph = build_graph(index(), checkpointer=open_checkpointer())
 
     out: list[Answer] = []
-    for job in jobs.recent(conn, limit=100):
-        for qid in jobs.question_ids(conn, job.id):
-            snapshot = graph.get_state(thread_config(qid))
+    for job in store.recent(limit=100):
+        for qid in store.question_ids(job.id):
+            # Namespaced, or two tenants' q1 collide -- MISTAKES entry 35.
+            thread = thread_id(job.id, qid)
+            snapshot = graph.get_state(thread_config(thread))
             if snapshot.next == ("human_review",):
                 out.append(
-                    answer_for(graph, qid, (snapshot.values or {}).get("question", ""))
+                    answer_for(
+                        graph,
+                        thread,
+                        qid,
+                        (snapshot.values or {}).get("question", ""),
+                        job.id,
+                    )
                 )
     return out
 

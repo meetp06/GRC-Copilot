@@ -32,10 +32,15 @@ def controls_for(state: QuestionState) -> dict:
 
     conn = connect()
     pairs = [(c["source"], c["section"]) for c in cited]
-    # Only "?" markers, one pair per cited section. The values are bound, never
-    # interpolated -- SQLite has no syntax for a variable-length parameter list,
-    # so the marker count has to be built into the string. (nosec B608 below.)
-    placeholders = ",".join("(?,?)" for _ in pairs)
+    # An OR of equality pairs, not `(a, b) IN (VALUES (?,?), ...)`.
+    #
+    # Row values in an IN clause need SQLite 3.15+. That is fine on a developer
+    # machine and was not on the Lambda runtime, where the same query failed
+    # with "near ',': syntax error" -- a bug that could not appear locally at
+    # all. This form works on every version.
+    #
+    # Only "?" markers are interpolated; every value is bound. (nosec B608.)
+    placeholders = " OR ".join("(p.source = ? AND p.section = ?)" for _ in pairs)
     flat = [v for pair in pairs for v in pair]
 
     rows = conn.execute(
@@ -44,7 +49,7 @@ def controls_for(state: QuestionState) -> dict:
         FROM policy_section p
         JOIN satisfies s ON s.section_id = p.id
         JOIN control c ON c.id = s.control_id
-        WHERE (p.source, p.section) IN (VALUES {placeholders})
+        WHERE {placeholders}
         ORDER BY s.confidence DESC
         """,  # nosec B608
         flat,
@@ -60,7 +65,7 @@ def controls_for(state: QuestionState) -> dict:
                 FROM policy_section p
                 JOIN satisfies s ON s.section_id = p.id
                 JOIN crosswalk x ON x.control_id = s.control_id
-                WHERE (p.source, p.section) IN (VALUES {placeholders})
+                WHERE {placeholders}
                 ORDER BY x.criterion
                 """,  # nosec B608
                 flat,

@@ -113,8 +113,33 @@ class Control:
 
 
 def connect(path: Path | None = None) -> sqlite3.Connection:
-    db_path = path or DB_PATH
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    """Open the ontology database.
+
+    With no path, ask src.api.store where it lives -- locally that is the repo,
+    on Lambda a copy downloaded from S3 into /tmp. Falls back to the repo path
+    when that import is unavailable, so the CLI tools work standalone.
+    """
+    if path is None:
+        try:
+            from src.api.store import ontology_path
+        except ImportError:
+            # The CLI tools import this module without the API package
+            # available. Only an import failure is tolerated here.
+            path = DB_PATH
+        else:
+            # Any failure inside ontology_path() -- an S3 download, a missing
+            # bucket -- must surface. An earlier version caught Exception and
+            # fell back to the repo path, which on Lambda is read-only: the
+            # real error vanished and a confusing OSError from mkdir took its
+            # place. Same shape as MISTAKES entry 3, a fallback that hides the
+            # thing that actually broke.
+            path = ontology_path()
+
+    db_path = path
+    # Only create the directory for the local default. The Lambda path is
+    # /tmp, which exists, and the packaged path is read-only.
+    if db_path == DB_PATH:
+        db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
