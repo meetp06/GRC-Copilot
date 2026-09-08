@@ -42,7 +42,7 @@ document, so it survives an auditor.
 | 3 | LangGraph multi-agent + human-in-the-loop | ✅ Complete |
 | 4 | Data pipeline + control ontology | ✅ Complete |
 | 5 | FastAPI + SDK + MCP + observability | ✅ Complete |
-| 6 | Terraform + CI/CD + threat model | 🟡 Next |
+| 6 | Terraform + CI/CD + threat model | ✅ Complete |
 
 *Keep this table current. It's the first thing anyone reads.*
 
@@ -235,7 +235,53 @@ Decisions: [ADR-0012 Dagster](docs/adr/0012-dagster-for-ingestion.md),
 
 | Measurement | Result |
 |---|---|
-| Total AWS spend, weeks 1-5 | ~$0.07 |
+| Total AWS spend, weeks 1-6 | ~$0.10 plus ~$2.40/month while deployed |
+
+> **Deployed?** Run `tofu -chdir=infra destroy` when you are done demonstrating it.
+> The two KMS keys bill whether or not anyone calls the API.
+
+### What week 6 deployed
+
+Live on AWS. `git push` runs the checks; `tofu apply` deploys.
+
+```
+API Gateway (HTTP API) ─▶ Lambda (FastAPI via Mangum) ─▶ Bedrock
+                                  ↘ S3        index + ontology
+                                  ↘ DynamoDB  jobs + checkpoints
+```
+
+Answering a questionnaire against the deployed API:
+
+| Question | Result |
+|---|---|
+| "Do you apply least privilege to information access?" | approved, cites *AO 48 :: Access Control* |
+| "Do you have an incident response plan?" | approved → IR-01/04/08 → CC7.3/7.4/7.5 |
+| "Are you SOC 2 Type II certified?" | **needs_review** — *"The policy corpus does not cover this."* |
+
+Approving the third one through `/reviews/{job}/{question}/approve` resumed a graph that had
+paused in a **Lambda container that no longer existed**. That is the week 3 durability claim
+across machines rather than processes.
+
+**27 resources, ~$2.40/month idle** — almost entirely two KMS keys. DynamoDB on-demand and
+Lambda are $0 when nothing runs, which is why they are here rather than RDS and ECS.
+
+**Four bugs appeared only in production**, and the worst one is the useful one: three of my
+string-replace patches had silently done nothing because the file was reformatted between
+edits, so the cross-tenant thread-namespacing fix never reached the code that writes
+checkpoints. Found by reading the live DynamoDB partition keys — they said `e3`, not
+`{job}:e3`. See MISTAKES 39-42.
+
+**Security**, in [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md): seven threats with what is
+implemented against each and, where partial, exactly how partial. Prompt injection is
+described as mitigated and not solved, because it is not solved.
+
+CI runs lint, offline tests, gitleaks, bandit, pip-audit, `tofu validate` and tfsec on every
+pull request, plus an opt-in eval gate that fails the build when retrieval drops below
+measured floors. **CI deliberately cannot deploy** — that needs an OIDC role, and a pipeline
+that can deploy is a pipeline whose credentials can.
+
+Decisions: [ADR-0016 OpenTofu](docs/adr/0016-opentofu-over-terraform.md),
+[ADR-0017 serverless](docs/adr/0017-serverless-and-what-it-costs.md).
 
 ## Quickstart
 

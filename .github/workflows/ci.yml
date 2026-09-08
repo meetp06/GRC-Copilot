@@ -91,6 +91,35 @@ jobs:
           pip install pip-audit
           pip-audit -r requirements.txt --strict
 
+  infra:
+    # Terraform is checked on every PR, and never applied by CI. Applying needs
+    # an OIDC role that does not exist yet -- see ADR-0017. A pipeline that can
+    # deploy is a pipeline whose credentials can deploy, and that is a decision
+    # to make deliberately rather than as a side effect of adding a job.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: 1.12.6
+
+      - name: Format
+        run: tofu -chdir=infra fmt -check -diff
+
+      - name: Validate
+        # -backend=false: no credentials, no state, no AWS calls. This checks
+        # the configuration is well-formed and internally consistent, which is
+        # what a pull request can check without being trusted with an account.
+        run: |
+          tofu -chdir=infra init -backend=false -input=false
+          tofu -chdir=infra validate
+
+      - name: Terraform security scan
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: infra
+          soft_fail: false
+
   eval-gate:
     # Only on explicit request. Costs money and needs credentials, so it must
     # never run automatically on a pull request from a fork.
