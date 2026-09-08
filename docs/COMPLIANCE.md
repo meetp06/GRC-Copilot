@@ -49,7 +49,7 @@ Each row names where the evidence is, so it can be checked rather than believed.
 | **RA-5** Vulnerability monitoring | Implemented | `pip-audit` for dependency CVEs, `bandit` for Python issues, `tfsec` for Terraform, `gitleaks` for committed secrets — all on every pull request. |
 | **SA-11** Developer testing | Implemented | 124 tests, all offline. The eval gate fails the build if retrieval regresses below measured floors. |
 | **SA-15** Development process | Implemented | 17 ADRs recording decisions and their alternatives; 42 entries in `MISTAKES.md` recording failures and their causes. |
-| **IA-5** Authenticator management | Partial | The API key lives in Secrets Manager under a customer-managed key, never in an environment variable or in Terraform state. It is never rotated. |
+| **IA-5** Authenticator management | Partial | The API key lives in Secrets Manager under a customer-managed key, never in an environment variable or in Terraform state. Rotation has been exercised once (2026-09-07) and is manual, unscheduled, and not a true revocation: `_expected_api_key()` is cached per Lambda container, so a warm container honours a withdrawn key until it is recycled. |
 | **SI-10** Information input validation | Implemented | Uploads are size-capped, row-capped, UTF-8 validated, and checked for duplicate ids. Exported CSV cells are neutralised against spreadsheet formula injection. |
 
 ## What is not implemented, and what it would take
