@@ -84,6 +84,7 @@
         "s3:DeleteBucket",
         "s3:DeleteBucketPolicy",
         "s3:DeleteObject",
+        "s3:DeleteObjectVersion",
         "s3:PutBucketPolicy",
         "s3:PutBucketPublicAccessBlock",
         "s3:PutBucketTagging",
@@ -109,14 +110,15 @@
       "Action": [
         "iam:CreateRole",
         "iam:DeleteRole",
+        "iam:DeleteRolePolicy",
         "iam:GetRole",
+        "iam:GetRolePolicy",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListInstanceProfilesForRole",
+        "iam:ListRolePolicies",
         "iam:PassRole",
         "iam:PutRolePolicy",
-        "iam:DeleteRolePolicy",
-        "iam:GetRolePolicy",
-        "iam:TagRole",
-        "iam:ListRolePolicies",
-        "iam:ListAttachedRolePolicies"
+        "iam:TagRole"
       ],
       "Resource": "arn:aws:iam::*:role/grc-copilot-*"
     }

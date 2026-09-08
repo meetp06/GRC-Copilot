@@ -71,8 +71,18 @@ curl -X POST "$URL/reviews/{job}/{question}/approve" -H "X-API-Key: $KEY" -d '{}
 ## Take it down
 
 ```bash
+export AWS_PROFILE=grc-copilot
+export TF_VAR_api_key="$(grep '^GRC_API_KEY=' .env | cut -d= -f2-)"   # no default, so destroy needs it too
 tofu -chdir=infra destroy
 ```
+
+Two permissions exist in `deploy-policy.json` only for this direction, and both were missing
+the first time it ran: `s3:DeleteObjectVersion`, because `force_destroy` on a versioned bucket
+deletes every object version rather than every object, and `iam:ListInstanceProfilesForRole`,
+because the SDK checks a role for instance profiles before deleting it.
+
+The two KMS keys do not disappear. They enter `PendingDeletion` for 7 days -- AWS's minimum --
+and bill $1/month each until then. Everything else stops costing immediately.
 
 **Do this when you have finished demonstrating it.** Idle cost is about $2.40/month, almost
 entirely the two KMS keys — everything else is $0 when nothing runs, but the keys bill whether
