@@ -351,6 +351,7 @@ the next week's work.
 | Document | What it's for |
 |----------|---------------|
 | [CLAUDE.md](CLAUDE.md) | Ground rules for Claude Code working in this repo |
+| [docs/STUDY-GUIDE.md](docs/STUDY-GUIDE.md) | The whole build in one sitting — plain language, then the technical detail |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | The whole six-week plan |
 | [docs/weeks/](docs/weeks/) | Detailed plan per week — tasks, hours, definition of done |
 | [docs/TECH-CHOICES.md](docs/TECH-CHOICES.md) | Every technology, its alternatives, when each wins |
